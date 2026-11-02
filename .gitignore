@@ -1,0 +1,18 @@
+# Rust / Tauri
+src-tauri/target/
+target/
+
+# Node
+node_modules/
+
+# 本地产物
+dist/
+.tmp_publish/
+*.zip
+
+# 调研仓库（独立上游，不入库）
+dsh-research/
+
+# 日志与临时
+*.log
+app-*.log
