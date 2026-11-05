@@ -32,7 +32,7 @@ jobs:
           restore-keys: |
             cargo-${{ runner.os }}-
 
-      - name: 单元测试（40 项）
+      - name: 单元测试
         run: cargo test --workspace --locked
 
       - name: 发布构建
