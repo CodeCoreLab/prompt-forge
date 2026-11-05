@@ -1,32 +1,71 @@
-name: Build Rust CLI
+name: Build
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, electron-migration ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, electron-migration ]
   workflow_dispatch:
 
 jobs:
-  build:
+  build-rust:
+    name: Rust CLI (Windows)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           targets: x86_64-pc-windows-msvc
-      
+
       - name: Build CLI
-        run: |
-          cd rust-core
-          cargo build --release
-      
+        run: cargo build --release --manifest-path rust-core/Cargo.toml
+
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
           name: prompt-forge-cli-windows
           path: rust-core/target/release/prompt-forge-cli.exe
+          retention-days: 30
+
+  build-app:
+    name: Electron App (Windows)
+    runs-on: windows-latest
+    needs: build-rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build Rust CLI
+        run: cargo build --release --manifest-path rust-core/Cargo.toml
+
+      - name: Install deps
+        run: |
+          npm install
+          npm install-scripts approve electron win-dpapi
+          npm install
+
+      - name: Package NSIS installer
+        run: npx electron-builder --win nsis --x64
+
+      - name: Package portable exe
+        run: npx electron-builder --win portable --x64
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: prompt-forge-windows-installer
+          path: dist/*.exe
           retention-days: 30

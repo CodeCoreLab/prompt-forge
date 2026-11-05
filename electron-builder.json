@@ -1,42 +1,39 @@
 {
-  "package": {
-    "productName": "Prompt Forge",
-    "version": "1.0.0"
+  "appId": "com.promptforge.app",
+  "productName": "Prompt Forge",
+  "directories": {
+    "output": "dist"
   },
-  "build": {
-    "appId": "com.promptforge.app",
-    "productName": "Prompt Forge",
-    "directories": {
-      "output": "dist"
-    },
-    "files": [
-      "src/**/*",
-      "rust-core/target/release/prompt-forge-cli.exe",
-      "assets/**/*"
-    ],
-    "extraResources": [
+  "files": [
+    "src/**/*",
+    "assets/**/*"
+  ],
+  "extraResources": [
+    {
+      "from": "rust-core/target/release/",
+      "to": "rust-core/",
+      "filter": [
+        "prompt-forge-cli.exe"
+      ]
+    }
+  ],
+  "win": {
+    "target": [
       {
-        "from": "rust-core/target/release/",
-        "to": "rust-core/",
-        "filter": ["prompt-forge-cli.exe"]
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
       }
     ],
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": ["x64"]
-        }
-      ],
-      "icon": "assets/icon.ico"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "installMode": "currentUser",
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "Prompt Forge"
-    }
+    "icon": "assets/icon.ico"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "perMachine": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Prompt Forge"
   }
 }

@@ -19,7 +19,6 @@ pub fn is_encrypted(s: &str) -> bool {
 #[cfg(target_os = "windows")]
 mod dpapi {
     use super::PREFIX;
-    use base64::Engine as _;
 
     // CRYPTPROTECT_UI_FORBIDDEN
     const UI_FORBIDDEN: u32 = 0x1;

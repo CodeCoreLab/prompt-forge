@@ -76,28 +76,14 @@ fn default_true() -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryEntry {
-    pub id: String,
-    pub original: String,
-    pub enhanced: String,
-    pub mode: String,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppConfig {
-    /// 当前生效的配置索引
-    pub active_index: usize,
-    pub profiles: Vec<LlmConfig>,
-    #[serde(default)]
-    pub close_to_tray: bool,
-    #[serde(default = "default_true")]
-    pub autostart: bool,
-    /// 用户自定义增强模式（P1-1 模板外置）
-    #[serde(default)]
-    pub custom_modes: Vec<CustomMode>,
-    /// 历史记录（最近 20 条）
-    #[serde(default)]
-    pub history: Vec<HistoryEntry>,
+    /// 原始输入
+    pub input: String,
+    /// 模式 id（内置 id 或 custom-xxx）
+    pub mode_id: String,
+    /// 增强结果
+    pub output: String,
+    /// unix 秒
+    pub ts: u64,
 }
 
 impl Default for AppConfig {
@@ -166,6 +152,7 @@ mod tests {
             close_to_tray: true,
             autostart: true,
             custom_modes: Vec::new(),
+            history: Vec::new(),
         }
     }
 

@@ -1,68 +1,38 @@
-const { app } = require('electron');
 const path = require('path');
-const fs = require('fs');
 
+/**
+ * 配置访问层：唯一真源是 Rust CLI（config.json）。
+ *
+ * 原因：Rust 侧负责 DPAPI 加密/解密与历史记录落盘；Node 侧若自行读写
+ * 同一文件会覆盖历史并写出明文 Key。故此处只做 CLI 代理 + 同步缓存。
+ */
 class ConfigManager {
-  constructor() {
-    this.configPath = this.getConfigPath();
-    this.config = this.load();
+  /** @param {(action: string, payload?: object) => Promise<any>} sendToCli */
+  constructor(sendToCli) {
+    this.sendToCli = sendToCli;
+    this.config = null;
   }
 
-  getConfigPath() {
-    const home = require('os').homedir();
-    const dir = path.join(home, 'AppData', 'Roaming', 'prompt-forge');
-    fs.mkdirSync(dir, { recursive: true });
-    return path.join(dir, 'config.json');
-  }
-
-  load() {
-    try {
-      if (fs.existsSync(this.configPath)) {
-        const content = fs.readFileSync(this.configPath, 'utf-8');
-        return JSON.parse(content);
-      }
-    } catch (e) {
-      console.error('Failed to load config:', e);
-    }
-    return {
-      profiles: [],
-      active_index: 0,
-      close_to_tray: true,
-      autostart: true,
-      custom_modes: [],
-    };
-  }
-
-  save(config) {
-    try {
-      fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2));
-      this.config = config;
-    } catch (e) {
-      console.error('Failed to save config:', e);
-      throw e;
-    }
-  }
-
-  getConfig() {
+  async refresh() {
+    this.config = await this.sendToCli('get_config');
     return this.config;
   }
 
-  addModel(model) {
-    if (this.config.profiles.some(m => m.name === model.name)) {
-      throw new Error(`模型配置「${model.name}」已存在`);
-    }
-    this.config.profiles.push(model);
-    this.save(this.config);
+  async getConfig() {
+    if (!this.config) await this.refresh();
+    return this.config;
   }
 
-  removeModel(index) {
-    if (index >= 0 && index < this.config.profiles.length) {
-      this.config.profiles.splice(index, 1);
-      if (this.config.active_index >= this.config.profiles.length) {
-        this.config.active_index = 0;
-      }
-      this.save(this.config);
-    }
+  /** 同步读取缓存（窗口事件等非 async 上下文用） */
+  current() {
+    return this.config;
+  }
+
+  /** 保存：Rust 侧加密 Key + 校验 + 原子写 */
+  async save(config) {
+    await this.sendToCli('save_config', config);
+    this.config = config;
+    return this.config;
   }
 }
 
