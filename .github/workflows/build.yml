@@ -54,7 +54,7 @@ jobs:
       - name: Install deps
         run: |
           npm install
-          npm install-scripts approve electron win-dpapi
+          npm install-scripts approve electron
           npm install
 
       - name: Package NSIS installer

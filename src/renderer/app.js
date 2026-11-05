@@ -16,7 +16,7 @@ async function init() {
     ]);
   } catch (e) {
     setStatus(`初始化失败: ${e}`, "err");
-    config = { active_index: 0, profiles: [], close_to_tray: true, autostart: true, custom_modes: [] };
+    config = { active_index: 0, profiles: [], close_to_tray: true, autostart: true, custom_modes: [], history: [] };
   }
   renderModes();
   renderProfileSelect();
