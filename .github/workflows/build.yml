@@ -71,3 +71,28 @@ jobs:
             dist/*.exe
             dist/*.blockmap
           retention-days: 30
+
+  release:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    needs: build-app
+    if: github.ref == 'refs/heads/electron-migration' || github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    steps:
+      - name: Download installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: prompt-forge-windows-installer
+          path: dist
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Build ${{ github.run_number }}
+          prerelease: true
+          files: |
+            dist/*.exe
+            dist/*.blockmap
+          fail_on_unmatched_files: false
