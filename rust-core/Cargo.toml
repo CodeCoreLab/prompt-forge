@@ -1,0 +1,9 @@
+[workspace]
+members = ["crates/prompt-forge-core", "crates/prompt-forge-cli"]
+resolver = "2"
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+authors = ["CodeCoreLab"]
+license = "MIT"

@@ -1,0 +1,32 @@
+name: Build Rust CLI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+      
+      - name: Build CLI
+        run: |
+          cd rust-core
+          cargo build --release
+      
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: prompt-forge-cli-windows
+          path: rust-core/target/release/prompt-forge-cli.exe
+          retention-days: 30

@@ -1,0 +1,52 @@
+{
+  "name": "prompt-forge",
+  "version": "1.0.0",
+  "description": "桌面提示词快速增强工具 - Electron 重构版",
+  "main": "src/main/index.js",
+  "scripts": {
+    "dev": "electron .",
+    "build:rust": "cd rust-core && cargo build --release",
+    "build": "npm run build:rust && electron-builder",
+    "build:portable": "npm run build:rust && electron-builder --win portable",
+    "package": "npm run build"
+  },
+  "author": "CodeCoreLab",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "dependencies": {},
+  "build": {
+    "appId": "com.promptforge.app",
+    "productName": "Prompt Forge",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installMode": "currentUser",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "files": [
+      "src/**/*",
+      "rust-core/target/release/prompt-forge-cli.exe",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "rust-core/target/release/",
+        "to": "rust-core/",
+        "filter": ["prompt-forge-cli.exe"]
+      }
+    ]
+  }
+}
