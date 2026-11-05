@@ -16,7 +16,9 @@
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0"
   },
-  "dependencies": {},
+  "dependencies": {
+    "win-dpapi": "^1.1.0"
+  },
   "build": {
     "appId": "com.promptforge.app",
     "productName": "Prompt Forge",

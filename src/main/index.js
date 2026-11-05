@@ -8,6 +8,9 @@ let mainWindow = null;
 let tray = null;
 let rustProcess = null;
 let configManager = null;
+const pendingRequests = new Map();
+let requestId = 0;
+let isRestarting = false;
 
 // ── Rust CLI 路径 ──
 function getCliPath() {
@@ -22,6 +25,8 @@ function getCliPath() {
 // ── 启动 Rust CLI ──
 function startRustCli() {
   const cliPath = getCliPath();
+  console.log(`Starting Rust CLI: ${cliPath}`);
+  
   rustProcess = spawn(cliPath, [], {
     stdio: ['pipe', 'pipe', 'inherit'],
   });
@@ -42,16 +47,22 @@ function startRustCli() {
     console.error('CLI stderr:', data.toString());
   });
 
-  rustProcess.on('exit', (code) => {
-    console.log(`CLI exited with code ${code}`);
+  rustProcess.on('exit', (code, signal) => {
+    console.log(`CLI exited with code ${code}, signal ${signal}`);
     rustProcess = null;
+    // 自动重启（除非应用正在退出）
+    if (!app.isQuitting && !isRestarting) {
+      console.log('Restarting Rust CLI...');
+      setTimeout(startRustCli, 500);
+    }
+  });
+
+  rustProcess.on('error', (err) => {
+    console.error('CLI spawn error:', err);
   });
 }
 
 // ── 处理 CLI 消息 ──
-const pendingRequests = new Map();
-let requestId = 0;
-
 function handleCliMessage(msg) {
   if (pendingRequests.has(msg.id)) {
     const { resolve, reject } = pendingRequests.get(msg.id);
@@ -64,12 +75,64 @@ function handleCliMessage(msg) {
   }
 }
 
+// ── 发送请求到 CLI ──
 function sendToCli(action, payload = {}) {
   return new Promise((resolve, reject) => {
+    if (!rustProcess || rustProcess.killed) {
+      return reject(new Error('CLI not running'));
+    }
+
     const id = (++requestId).toString();
     pendingRequests.set(id, { resolve, reject });
     const req = { id, action, ...payload };
-    rustProcess.stdin.write(JSON.stringify(req) + '\n');
+    
+    try {
+      rustProcess.stdin.write(JSON.stringify(req) + '\n');
+    } catch (e) {
+      pendingRequests.delete(id);
+      reject(new Error('Failed to write to CLI: ' + e.message));
+    }
+  });
+}
+
+// ── 取消增强 ──
+function cancelEnhance() {
+  return new Promise((resolve) => {
+    if (!rustProcess || rustProcess.killed) {
+      return resolve();
+    }
+
+    // 标记正在重启
+    isRestarting = true;
+    
+    // 拒绝所有 pending 请求
+    for (const [id, { reject }] of pendingRequests) {
+      reject(new Error('cancelled:已取消'));
+    }
+    pendingRequests.clear();
+
+    // 终止 Rust 进程
+    try {
+      rustProcess.kill('SIGTERM');
+    } catch (e) {
+      // 进程可能已经退出
+    }
+
+    // 等待进程退出后重启
+    const checkExit = setInterval(() => {
+      if (!rustProcess || rustProcess.killed) {
+        clearInterval(checkExit);
+        isRestarting = false;
+        resolve();
+      }
+    }, 100);
+
+    // 超时保护
+    setTimeout(() => {
+      clearInterval(checkExit);
+      isRestarting = false;
+      resolve();
+    }, 5000);
   });
 }
 
@@ -202,7 +265,7 @@ function setupIpc() {
 
   // 取消增强
   ipcMain.handle('cancelEnhance', async () => {
-    // TODO: 实现取消逻辑
+    await cancelEnhance();
     return undefined;
   });
 
