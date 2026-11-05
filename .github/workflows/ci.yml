@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: 测试并编译（Windows）
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 cargo 依赖与构建产物
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: 单元测试（40 项）
+        run: cargo test --workspace --locked
+
+      - name: 发布构建
+        run: cargo build --release --locked
+
+      - name: 上传可执行文件
+        uses: actions/upload-artifact@v4
+        with:
+          name: prompt-forge-windows-x64
+          path: target/release/prompt-forge.exe
+          if-no-files-found: error

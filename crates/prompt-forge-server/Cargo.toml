@@ -1,0 +1,46 @@
+[package]
+name = "prompt-forge-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Prompt Forge HTTP 服务：静态资源托管 + JSON API（纯 Web 前端后端）"
+
+[[bin]]
+name = "prompt-forge"
+path = "src/main.rs"
+
+[dependencies]
+prompt-forge-core = { path = "../prompt-forge-core" }
+
+# HTTP 框架：路由 + 提取器 + 静态托管能力（静态托管由本 crate 自实现，不引 tower-http）
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+# 异步运行时
+tokio = { version = "1", default-features = false, features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "signal",
+    "sync",
+    "time",
+] }
+# 优雅取消令牌（enhance 可中断）
+tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
+# LLM 出站 HTTP
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "native-tls",
+    "charset",
+    "http2",
+] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+# 开机自启（HKCU\...\Run 写入），纯 Rust 调用 Win32 注册表 API
+winreg = "0.55"
+
+[features]
+default = []
+# 诊断：打印逐请求访问日志
+trace-requests = []

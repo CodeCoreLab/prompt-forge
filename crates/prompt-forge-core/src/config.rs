@@ -4,7 +4,9 @@
 //! 本模块只承载结构与校验规则，使校验逻辑可独立测试。
 
 use serde::{Deserialize, Serialize};
+use crate::methods::{DEFAULT_METHOD_ID, DEFAULT_THINKING_ID};
 use crate::modes::CustomMode;
+use crate::roles::{CustomRole, DEFAULT_ROLE_ID};
 
 pub const CONFIG_FILE: &str = "config.json";
 
@@ -53,6 +55,44 @@ fn default_temperature() -> f32 {
     0.7
 }
 
+/// 增强选项：增强方式 + 深度思考强度 + 当前生效角色。
+///
+/// 三者与「增强模式」正交，构成完整的增强指令：
+/// - `method_id`：增强方式（通用/深度/代码/创意/严谨）
+/// - `thinking`：深度思考强度（off/low/standard/deep/max）
+/// - `role_id`：当前生效角色（builtin-* 或 custom-*）
+///
+/// 全部带 `serde(default)`，旧配置文件缺字段时自动回落默认值（向后兼容）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnhanceOptions {
+    #[serde(default = "default_method_id")]
+    pub method_id: String,
+    #[serde(default = "default_thinking_id")]
+    pub thinking: String,
+    #[serde(default = "default_role_id")]
+    pub role_id: String,
+}
+
+fn default_method_id() -> String {
+    DEFAULT_METHOD_ID.to_string()
+}
+fn default_thinking_id() -> String {
+    DEFAULT_THINKING_ID.to_string()
+}
+fn default_role_id() -> String {
+    DEFAULT_ROLE_ID.to_string()
+}
+
+impl Default for EnhanceOptions {
+    fn default() -> Self {
+        Self {
+            method_id: default_method_id(),
+            thinking: default_thinking_id(),
+            role_id: default_role_id(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     /// 当前生效的配置索引
@@ -65,6 +105,12 @@ pub struct AppConfig {
     /// 用户自定义增强模式（P1-1 模板外置）
     #[serde(default)]
     pub custom_modes: Vec<CustomMode>,
+    /// 用户自定义角色（角色设定外置）
+    #[serde(default)]
+    pub custom_roles: Vec<CustomRole>,
+    /// 增强选项（增强方式 / 思考强度 / 生效角色）
+    #[serde(default)]
+    pub enhance: EnhanceOptions,
 }
 
 fn default_true() -> bool {
@@ -79,6 +125,8 @@ impl Default for AppConfig {
             close_to_tray: true,
             autostart: true,
             custom_modes: Vec::new(),
+            custom_roles: Vec::new(),
+            enhance: EnhanceOptions::default(),
         }
     }
 }
@@ -105,6 +153,26 @@ impl AppConfig {
             if !seen.insert(m.id.clone()) {
                 return Err(format!("自定义模式 id 重复: {}", m.id));
             }
+        }
+        // 自定义角色 id 全局唯一
+        let mut seen_roles = std::collections::HashSet::new();
+        for r in &self.custom_roles {
+            r.validate()?;
+            if !seen_roles.insert(r.id.clone()) {
+                return Err(format!("自定义角色 id 重复: {}", r.id));
+            }
+        }
+        // 增强选项合法性
+        if crate::methods::find_method(&self.enhance.method_id).is_none() {
+            return Err(format!(
+                "增强方式非法: {}（可选: {}）",
+                self.enhance.method_id,
+                crate::methods::METHODS
+                    .iter()
+                    .map(|m| m.id)
+                    .collect::<Vec<_>>()
+                    .join(" / ")
+            ));
         }
         Ok(())
     }
@@ -136,6 +204,8 @@ mod tests {
             close_to_tray: true,
             autostart: true,
             custom_modes: Vec::new(),
+            custom_roles: Vec::new(),
+            enhance: EnhanceOptions::default(),
         }
     }
 

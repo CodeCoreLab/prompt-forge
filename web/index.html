@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Prompt Forge · 提示词增强工作台</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- ══ 顶栏 ══════════════════════════════════════════════════ -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 16 16"><path fill="currentColor" d="M9.5 1 3 9h4l-1 6 7-8.5H8.5L9.5 1z"/></svg>
+      </span>
+      <span class="brand-name">Prompt Forge</span>
+      <span class="brand-sub">提示词增强工作台</span>
+    </div>
+
+    <!-- 当前生效角色：常驻显示，明确告知用户此刻是谁在改写 -->
+    <div class="role-chip" id="roleChip" title="当前生效角色">
+      <span class="role-chip-label">生效角色</span>
+      <span class="role-chip-name" id="roleChipName">通用助手</span>
+      <span class="role-chip-dot" aria-hidden="true"></span>
+    </div>
+
+    <div class="topbar-actions">
+      <button id="historyBtn" class="ghost-btn" title="最近 20 条增强记录">
+        <svg width="14" height="14" viewBox="0 0 16 16"><path fill="currentColor" d="M8 1.5a6.5 6.5 0 1 1-6.44 7.66l1.47-.26A5 5 0 1 0 8 3v2.2L4.6 2.7 8 .4zM7.25 4.5h1.5v3.4l2.3 1.33-.75 1.3-3.05-1.8z"/></svg>
+        <span>历史</span>
+      </button>
+      <button id="settingsBtn" class="primary-btn btn-sm">
+        <svg width="14" height="14" viewBox="0 0 16 16"><path fill="currentColor" d="M8 4.75a3.25 3.25 0 1 0 0 6.5 3.25 3.25 0 0 0 0-6.5zM13.3 8c0 .34-.03.67-.09 1l1.4 1.1-1.2 2.08-1.66-.6c-.5.42-1.08.75-1.72.96L9.75 14.3h-2.4l-.28-1.76a4.9 4.9 0 0 1-1.72-.96l-1.66.6-1.2-2.08L3.9 9a5.4 5.4 0 0 1 0-2l-1.4-1.1 1.2-2.08 1.66.6c.5-.42 1.08-.75 1.72-.96l.28-1.76h2.4l.28 1.76c.64.21 1.22.54 1.72.96l1.66-.6 1.2 2.08L13.2 7c.06.33.09.66.09 1z"/></svg>
+        <span>设置</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ══ 主工作区 ══════════════════════════════════════════════ -->
+  <main class="workspace">
+    <!-- ── 增强配置卡片 ── -->
+    <section class="card config-card">
+      <div class="card-head">
+        <h2 class="card-title">增强配置</h2>
+        <span class="card-hint">模式 · 方式 · 思考强度 · 角色，四者正交组合</span>
+      </div>
+      <div class="config-grid">
+        <div class="field">
+          <label class="field-label" for="modeSelect">增强模式<span class="field-note">决定产出结构</span></label>
+          <select id="modeSelect" class="control"></select>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="methodSelect">增强方式<span class="field-note">决定增强程度</span></label>
+          <select id="methodSelect" class="control"></select>
+        </div>
+
+        <div class="field field-wide">
+          <span class="field-label">深度思考强度<span class="field-note">分配推理预算</span></span>
+          <div class="segmented" id="thinkingSeg" role="radiogroup" aria-label="深度思考强度">
+            <button type="button" data-value="off" role="radio">关闭</button>
+            <button type="button" data-value="low" role="radio">轻</button>
+            <button type="button" data-value="standard" role="radio">标准</button>
+            <button type="button" data-value="deep" role="radio">深度</button>
+            <button type="button" data-value="max" role="radio">极致</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="roleSelect">生效角色<span class="field-note">以谁的身份产出</span></label>
+          <select id="roleSelect" class="control"></select>
+        </div>
+      </div>
+      <p class="config-summary" id="configSummary"></p>
+    </section>
+
+    <!-- ── 输入 / 输出 ── -->
+    <div class="io-grid">
+      <section class="card io-card">
+        <div class="card-head">
+          <h2 class="card-title">原始提示词</h2>
+          <span class="counter" id="inputCounter">0 字</span>
+        </div>
+        <textarea id="inputBox" placeholder="输入简短指令，如：帮我写周报&#10;&#10;Ctrl + Enter 快速增强" spellcheck="false"></textarea>
+      </section>
+
+      <section class="card io-card">
+        <div class="card-head">
+          <h2 class="card-title">增强结果</h2>
+          <div class="card-head-actions">
+            <span class="counter" id="outputCounter" hidden>0 字</span>
+            <button id="copyBtn" class="ghost-btn btn-sm" disabled>
+              <svg width="13" height="13" viewBox="0 0 16 16"><path fill="currentColor" d="M4 1.5h6.5L13 4v8.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 12.5v-9A1.5 1.5 0 0 1 4.5 2H4zm1 .5v9.5h7V4.5h-2.5V2zM1 4.5A1.5 1.5 0 0 1 2.5 3H3v1H2.5v7H9v-.5h1v.5A1.5 1.5 0 0 1 8.5 12h-6A1.5 1.5 0 0 1 1 10.5z"/></svg>
+              <span>复制</span>
+            </button>
+          </div>
+        </div>
+        <textarea id="outputBox" placeholder="增强后的提示词将显示在这里" spellcheck="false" readonly></textarea>
+      </section>
+    </div>
+
+    <!-- ── 操作条 ── -->
+    <div class="action-bar">
+      <button id="enhanceBtn" class="primary-btn btn-lg">
+        <span class="btn-label">开始增强</span>
+      </button>
+      <span id="statusText" class="status"></span>
+    </div>
+
+    <!-- 历史面板（内嵌下拉卡） -->
+    <div id="historyPanel" class="history-panel" hidden></div>
+  </main>
+
+  <!-- ══ 设置抽屉 ══════════════════════════════════════════════ -->
+  <div id="settingsOverlay" class="drawer-mask" hidden>
+    <aside class="drawer" role="dialog" aria-label="设置">
+      <div class="drawer-head">
+        <h2>设置</h2>
+        <button id="closeSettings" class="icon-btn" title="关闭" aria-label="关闭">
+          <svg width="15" height="15" viewBox="0 0 16 16"><path fill="currentColor" d="M3.7 3 8 7.3 12.3 3l.7.7L9.3 8l3.7 3.7-.7.7L8 8.7 3.7 12.4 3 11.7 6.7 8 3 4.3z"/></svg>
+        </button>
+      </div>
+
+      <nav class="tabs" id="tabs">
+        <button class="tab active" data-tab="model">模型接入</button>
+        <button class="tab" data-tab="role">角色管理</button>
+        <button class="tab" data-tab="system">系统</button>
+      </nav>
+
+      <div class="drawer-body">
+        <!-- ── 模型接入 ── -->
+        <section class="tab-pane active" data-pane="model">
+          <div class="profile-row">
+            <select id="profileSelect" class="control"></select>
+            <button id="newProfile" class="ghost-btn btn-sm">新建</button>
+            <button id="delProfile" class="ghost-btn btn-sm danger">删除</button>
+          </div>
+
+          <div class="form-grid">
+            <label class="form-label" for="pfName">配置名称</label>
+            <div class="form-control">
+              <input id="pfName" type="text" placeholder="如：DeepSeek" />
+            </div>
+
+            <label class="form-label" for="pfProtocol">协议</label>
+            <div class="form-control">
+              <select id="pfProtocol">
+                <option value="openai">OpenAI 兼容（含 DeepSeek / Kimi / Qwen / GLM 等）</option>
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="ollama">Ollama（本地）</option>
+                <option value="gemini">Gemini</option>
+              </select>
+            </div>
+
+            <label class="form-label" for="pfBaseUrl">API 地址</label>
+            <div class="form-control">
+              <!-- 粘贴完整 URL 后自动解析回填：主机 / 端口 / 路径 / 接口路径 -->
+              <input id="pfBaseUrl" type="text" list="urlPresets" autocomplete="off"
+                     placeholder="https://api.deepseek.com/v1" />
+              <datalist id="urlPresets">
+                <option value="https://api.openai.com/v1"></option>
+                <option value="https://api.deepseek.com/v1"></option>
+                <option value="https://api.moonshot.cn/v1"></option>
+                <option value="https://dashscope.aliyuncs.com/compatible-mode/v1"></option>
+                <option value="https://open.bigmodel.cn/api/paas/v4"></option>
+                <option value="https://api.anthropic.com"></option>
+                <option value="https://generativelanguage.googleapis.com"></option>
+                <option value="http://127.0.0.1:11434"></option>
+              </datalist>
+              <div class="url-parse" id="urlParse" hidden></div>
+            </div>
+
+            <label class="form-label" for="pfModel">模型</label>
+            <div class="form-control">
+              <input id="pfModel" type="text" placeholder="deepseek-chat" />
+            </div>
+
+            <label class="form-label" for="pfApiKey">API Key</label>
+            <div class="form-control">
+              <input id="pfApiKey" type="password" placeholder="本地 Ollama 可留空" autocomplete="off" />
+              <span class="field-hint">本地以 Windows DPAPI 加密存储，不落明文</span>
+            </div>
+
+            <label class="form-label" for="pfTemp">Temperature</label>
+            <div class="form-control">
+              <input id="pfTemp" type="number" min="0" max="2" step="0.1" value="0.7" />
+            </div>
+          </div>
+
+          <div class="inline-actions">
+            <button id="testBtn" class="ghost-btn">测试连接</button>
+            <span id="testResult" class="status"></span>
+          </div>
+        </section>
+
+        <!-- ── 角色管理 ── -->
+        <section class="tab-pane" data-pane="role">
+          <p class="pane-desc">角色是一段前置的 System Prompt，决定改写时的身份与口吻。内置角色开箱即用，也可新建自己的角色。</p>
+
+          <div class="profile-row">
+            <select id="crSelect" class="control"></select>
+            <button id="crNew" class="ghost-btn btn-sm">新建</button>
+            <button id="crDel" class="ghost-btn btn-sm danger">删除</button>
+          </div>
+
+          <div class="form-grid">
+            <label class="form-label" for="crId">角色 ID</label>
+            <div class="form-control">
+              <input id="crId" type="text" placeholder="英文短名，如 security-review" />
+            </div>
+            <label class="form-label" for="crName">角色名称</label>
+            <div class="form-control">
+              <input id="crName" type="text" placeholder="如：安全审计官" />
+            </div>
+          </div>
+
+          <label class="form-label block" for="crPrompt">角色设定（System Prompt）</label>
+          <textarea id="crPrompt" rows="5" spellcheck="false"
+                    placeholder="描述该角色的身份、关注点、输出偏好与禁区…"></textarea>
+
+          <div class="inline-actions">
+            <button id="crApply" class="ghost-btn">设为生效角色</button>
+            <span id="crStatus" class="status"></span>
+          </div>
+        </section>
+
+        <!-- ── 系统 ── -->
+        <section class="tab-pane" data-pane="system">
+          <h3 class="pane-title">应用行为</h3>
+          <label class="switch-row">
+            <input id="optCloseTray" type="checkbox" />
+            <span class="switch-text">关闭窗口时最小化到托盘</span>
+          </label>
+          <label class="switch-row">
+            <input id="optAutostart" type="checkbox" />
+            <span class="switch-text">开机自启动</span>
+          </label>
+
+          <h3 class="pane-title">自定义模式</h3>
+          <div class="profile-row">
+            <select id="cmSelect" class="control"></select>
+            <button id="cmNew" class="ghost-btn btn-sm">新建</button>
+            <button id="cmDel" class="ghost-btn btn-sm danger">删除</button>
+          </div>
+          <div class="form-grid">
+            <label class="form-label" for="cmId">模式 ID</label>
+            <div class="form-control">
+              <input id="cmId" type="text" placeholder="英文短名，如 code-review" />
+            </div>
+            <label class="form-label" for="cmName">名称</label>
+            <div class="form-control">
+              <input id="cmName" type="text" placeholder="如：代码审查" />
+            </div>
+            <label class="form-label" for="cmType">类型</label>
+            <div class="form-control">
+              <select id="cmType">
+                <option value="extend">继承（保留保真纪律）</option>
+                <option value="replace">替换（完全自写）</option>
+              </select>
+            </div>
+          </div>
+          <label class="form-label block" for="cmTemplate">策略模板</label>
+          <textarea id="cmTemplate" rows="4" spellcheck="false"
+                    placeholder="extend 型只写策略要求；replace 型写完整指令"></textarea>
+        </section>
+      </div>
+
+      <div class="drawer-foot">
+        <span id="saveHint" class="status"></span>
+        <button id="saveSettings" class="primary-btn">保存全部</button>
+      </div>
+    </aside>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

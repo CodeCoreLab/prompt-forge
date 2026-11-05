@@ -19,7 +19,6 @@ pub fn is_encrypted(s: &str) -> bool {
 #[cfg(target_os = "windows")]
 mod dpapi {
     use super::PREFIX;
-    use base64::Engine as _;
 
     // CRYPTPROTECT_UI_FORBIDDEN
     const UI_FORBIDDEN: u32 = 0x1;
@@ -30,6 +29,8 @@ mod dpapi {
         pb_data: *mut u8,
     }
 
+    // Win32 API 参数名保留 MSDN 原始拼写（与官方文档一一对应，便于比对）
+    #[allow(non_snake_case)]
     type CryptProtectDataFn = unsafe extern "system" fn(
         pDataIn: *const CryptBlob,
         szDataDescr: *const u16,
@@ -40,6 +41,7 @@ mod dpapi {
         pDataOut: *mut CryptBlob,
     ) -> i32;
 
+    #[allow(non_snake_case)]
     type CryptUnprotectDataFn = unsafe extern "system" fn(
         pDataIn: *const CryptBlob,
         ppszDataDescr: *mut *mut u16,
