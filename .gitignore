@@ -3,6 +3,10 @@ rust-core/target/
 node_modules/
 dist/
 
+# Local 7za shim build output (compiled from tools/7za-shim/shim.c)
+tools/7za-shim/7za.exe
+tools/7za-shim/real-7za.exe
+
 # IDE
 .vscode/
 .idea/
