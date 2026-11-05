@@ -27,7 +27,7 @@ prompt-forge-electron/
 │   ├── main/           # Electron 主进程
 │   │   ├── index.js   # 主入口，窗口/托盘/IPC
 │   │   ├── config.js  # 配置管理（Node.js）
-│   │   └── crypto.js  # DPAPI 加密（占位）
+│   │   └── crypto.js  # DPAPI 加密（win-dpapi + AES-256-GCM 回退）
 │   ├── preload/       # 预加载脚本（安全 IPC 桥接）
 │   │   └── index.js
 │   └── renderer/      # 前端（复用原始 UI）
@@ -127,10 +127,35 @@ npm run build:portable
 2. 或安装 [MinGW-w64](https://www.mingw-w64.org/)
 3. 确保 `gcc` 或 `cl.exe` 在 PATH 中
 
+**推荐方案**：直接使用 GitHub Actions 编译，下载 artifact 中的 `prompt-forge-cli.exe`。
+
 ### Electron 运行失败
 
 - 确保 Rust CLI 已编译：`cd rust-core && cargo build --release`
 - 检查 `prompt-forge-cli.exe` 是否存在
+- 开发模式下，确保 `node_modules` 已安装：`npm install`
+
+### win-dpapi 安装失败
+
+`win-dpapi` 需要 Python 和 C++ 编译工具链：
+
+```bash
+# 安装 windows-build-tools
+npm install --global --production windows-build-tools
+
+# 或使用 Visual Studio Build Tools
+# 然后重装
+npm install
+```
+
+如果仍失败，应用会自动回退到 AES-256-GCM 加密。
+
+### GitHub Actions 编译
+
+1. 推送代码到 `electron-migration` 分支
+2. 访问 https://github.com/CodeCoreLab/prompt-forge/actions
+3. 下载 `prompt-forge-cli-windows` artifact
+4. 放到 `rust-core/target/release/` 目录
 
 ## License
 
