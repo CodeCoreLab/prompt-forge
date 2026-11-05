@@ -67,13 +67,28 @@ npm run dev
 npm run build
 ```
 
-打包产物在 `dist/` 目录。
+打包产物在 `dist/` 目录：`Prompt Forge Setup 1.0.0.exe`（安装包）、`Prompt Forge 1.0.0.exe`（便携版）。
 
 ### 便携版
 
 ```bash
 npm run build:portable
 ```
+
+### 直接下载已编译产物
+
+推荐走 GitHub Actions（CI 已配置，无需本地 Rust / NSIS 工具链）：
+
+| 产物 | 说明 |
+|------|------|
+| `Prompt.Forge.Setup.1.0.0.exe` | NSIS 安装包（82 MB） |
+| `Prompt.Forge.1.0.0.exe` | 便携版（75 MB） |
+| `Prompt.Forge.Setup.1.0.0.exe.blockmap` | 差分更新元数据 |
+
+下载入口：<https://github.com/CodeCoreLab/prompt-forge/releases>
+
+Rust CLI 单独产物（`prompt-forge-cli-windows` artifact）可从
+<https://github.com/CodeCoreLab/prompt-forge/actions> 获取。
 
 ## 配置
 
@@ -99,27 +114,52 @@ API Key 存储于本地配置文件，不上传。
 - 检查 `prompt-forge-cli.exe` 是否存在
 - 开发模式下，确保 `node_modules` 已安装：`npm install`
 
-### win-dpapi 安装失败
+### 在受限环境启动 Electron
 
-`win-dpapi` 需要 Python 和 C++ 编译工具链：
+若 Electron 以纯 Node 模式启动（报 `Cannot read properties of undefined (reading 'whenReady')`），
+通常是环境变量 `ELECTRON_RUN_AS_NODE=1` 或 `NODE_OPTIONS` 指向了其他 Node 注入脚本：
 
 ```bash
-# 安装 windows-build-tools
-npm install --global --production windows-build-tools
-
-# 或使用 Visual Studio Build Tools
-# 然后重装
-npm install
+env -u ELECTRON_RUN_AS_NODE -u NODE_OPTIONS ./node_modules/electron/dist/electron.exe .
 ```
 
-如果仍失败，应用会自动回退到 AES-256-GCM 加密。
+### DPAPI 加密
+
+API Key 的加密完全由 Rust 侧 `prompt-forge-core::crypto` 承担（`libloading` 直调 `crypt32.dll`），
+Node 侧无原生模块依赖，因此**不需要** `node-gyp` / Visual Studio Build Tools。
+
+- 落盘格式：`enc:<base64>`（DPAPI 当前用户作用域加密）
+- 读取时自动解密为明文交给前端，旧版明文配置自动兼容
 
 ### GitHub Actions 编译
 
+推荐路径（无需本地 Rust / NSIS 工具链）：
+
 1. 推送代码到 `electron-migration` 分支
 2. 访问 https://github.com/CodeCoreLab/prompt-forge/actions
-3. 下载 `prompt-forge-cli-windows` artifact
-4. 放到 `rust-core/target/release/` 目录
+3. CI 依次执行：`Rust CLI (Windows)` → `Electron App (Windows)` → `Publish Release`
+4. 从 https://github.com/CodeCoreLab/prompt-forge/releases 下载安装包/便携版
+
+单独只需 CLI 二进制时，可下载 `prompt-forge-cli-windows` artifact，
+解压后放到 `rust-core/target/release/` 目录。
+
+CI 已在 `.github/workflows/build.yml` 中配置 `--publish never` + 独立 Release job，
+避免在无 `GH_TOKEN` 时因自动发布而中断构建。
+
+### 本地 NSIS 打包报符号链接错误
+
+electron-builder 打包时会解压 `winCodeSign` 工具包，其中包含 macOS 符号链接。
+Windows 未开启「开发者模式」时无法创建符号链接，会导致解压报错（Darwin 相关文件与 Windows 打包无关）。
+
+解决方案（二选一）：
+
+1. 开启 Windows 开发者模式（设置 → 系统 → 开发者选项 → 开发人员模式）
+2. 优先使用 GitHub Actions 编译（CI runner 无此限制）
+
+### Node.js 版本告警
+
+CI 中 `actions/checkout@v4` / `actions/upload-artifact@v4` 提示 Node.js 20 已弃用，
+属于 GitHub 平台侧提示，不影响构建产物。
 
 ## License
 
