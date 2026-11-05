@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "electron .",
     "build:rust": "cd rust-core && cargo build --release",
-    "build": "npm run build:rust && electron-builder --win nsis --x64",
-    "build:portable": "npm run build:rust && electron-builder --win portable --x64",
+    "build": "npm run build:rust && electron-builder --win nsis --x64 --publish never",
+    "build:portable": "npm run build:rust && electron-builder --win portable --x64 --publish never",
     "package": "npm run build"
   },
   "author": "CodeCoreLab",
