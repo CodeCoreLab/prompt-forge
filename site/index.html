@@ -4,11 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Prompt Forge — 一键把模糊想法变成高质量提示词</title>
-<meta name="description" content="桌面端提示词快速增强工具：Rust + Tauri 2，单文件 4.9MB，四协议接入任意大模型，输出自动规整，API Key DPAPI 加密。">
+<meta name="description" content="桌面端提示词快速增强工具：Electron 33 + Rust CLI，免 WebView2 运行时，四协议接入任意大模型，输出自动规整，API Key DPAPI 加密。">
 <link rel="canonical" href="https://xmtooldev.gf.com.cn/prompt-forge/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Prompt Forge — 一键把模糊想法变成高质量提示词">
-<meta property="og:description" content="桌面端提示词快速增强工具：Rust + Tauri 2，单文件 4.9MB，四协议接入任意大模型。">
+<meta property="og:description" content="桌面端提示词快速增强工具：Electron 33 + Rust CLI，免 WebView2 运行时，四协议接入任意大模型。">
 <meta property="og:url" content="https://xmtooldev.gf.com.cn/prompt-forge/">
 <meta name="theme-color" content="#ffffff">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%237C3AED'/%3E%3Cpath d='M16 6l2.2 6.2L24 14l-5.8 1.8L16 22l-2.2-6.2L8 14l5.8-1.8z' stroke='%23fff' stroke-width='2' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E">
@@ -178,15 +178,15 @@ footer .foot-links{margin-top:8px}
 
   <!-- Hero -->
   <div class="hero">
-    <span class="badge">Rust + Tauri 2 · 开源桌面工具</span>
+    <span class="badge">Electron 33 + Rust CLI · 开源桌面工具</span>
     <h1>一键把模糊想法<br>变成<em>可直接使用的提示词</em></h1>
     <p class="sub">输入一句「帮我写周报」，得到结构完整、约束清晰、带验收标准的任务提示词。
-    单文件 4.9MB，离线可用，接入你自己的任意大模型。</p>
+    基于 Electron 33 + Rust CLI 架构，彻底消除 WebView2 依赖，开箱即用，接入你自己的任意大模型。</p>
     <div class="cta">
       <a class="btn btn-primary" href="assets/PromptForge-1.0.0-win64.zip">⬇ 下载 Windows 版</a>
       <a class="btn btn-ghost" href="https://github.com/maxin-cn/prompt-forge" target="_blank" rel="noopener">查看源码</a>
     </div>
-    <p class="meta">Windows 10/11 x64 · 免安装解压即用 · 无需注册任何账号</p>
+    <p class="meta">Windows 10/11 x64 · Chromium 内嵌 · 无需注册任何账号</p>
 
     <!-- before/after -->
     <div class="demo">
@@ -205,10 +205,10 @@ footer .foot-links{margin-top:8px}
   <!-- 数字 -->
   <section class="block" id="stats">
     <div class="stats">
-      <div class="stat reveal"><div class="n">4.9<em>MB</em></div><div class="l">单文件体积</div></div>
-      <div class="stat reveal"><div class="n">4<em>种</em></div><div class="l">模型协议</div></div>
+      <div class="stat reveal"><div class="n">4<em>协议</em></div><div class="l">OpenAI / Anthropic / Ollama / Gemini</div></div>
       <div class="stat reveal"><div class="n">3+<em>N</em></div><div class="l">内置 + 自定义模式</div></div>
-      <div class="stat reveal"><div class="n">0<em>依赖</em></div><div class="l">免安装免运行时</div></div>
+      <div class="stat reveal"><div class="n">0<em>运行时依赖</em></div><div class="l">免 WebView2 / 免安装</div></div>
+      <div class="stat reveal"><div class="n">Rust<em>核心</em></div><div class="l">可独立测试与复用</div></div>
     </div>
   </section>
 
@@ -250,7 +250,7 @@ footer .foot-links{margin-top:8px}
     <h2 class="reveal">三步上手</h2>
     <p class="lead reveal">下载解压 → 填一个模型配置 → 开始增强。</p>
     <div class="steps">
-      <div class="step reveal"><div><h3>下载并解压</h3><p>取回 <b>PromptForge-1.0.0-win64.zip</b>，解压后双击 <b>prompt-forge.exe</b>。无需安装、无运行时依赖。</p></div></div>
+      <div class="step reveal"><div><h3>下载并解压</h3><p>取回 <b>PromptForge-Setup.exe</b>，双击安装。或使用便携版 <b>PromptForge-Portable.exe</b> 直接运行。无需安装 WebView2 或其他运行时。</p></div></div>
       <div class="step reveal"><div><h3>配置一个模型</h3><p>设置 → 新建配置：选协议（如 OpenAI 兼容）、填 Base URL（如 <b>https://api.deepseek.com</b>）、模型名和 API Key。点「测试连接」确认。</p></div></div>
       <div class="step reveal"><div><h3>输入一句，点增强</h3><p>左侧输入原始想法，选模式，点「增强」。结果可一键复制；不满意可点「取消」中断，或从历史里回填继续迭代。</p></div></div>
     </div>
@@ -263,13 +263,13 @@ footer .foot-links{margin-top:8px}
     <details class="reveal"><summary>和网页版提示词工具比有什么区别？</summary><p>三件事：① 模型配置完全自持，不受平台模型列表限制；② 托盘常驻 + 开机自启，随时唤起；③ 单文件离线分发，内网环境也能用本地 Ollama。</p></details>
     <details class="reveal"><summary>增强结果会带「以下是优化后的内容」这类废话吗？</summary><p>不会。输出纪律写进模板最高优先级：只输出提示词本体，禁前后缀、禁解释、禁代码块包裹；运行时还会再剥一层围栏和引号兜底。</p></details>
     <details class="reveal"><summary>为什么我的自定义模式里不写语言规则也能中英对应？</summary><p>extend 型自定义模式自动继承内置「保真与语言规则」（语言跟随、语义等价、防编造），你只需要写策略差异部分。</p></details>
-    <details class="reveal"><summary>源码在哪？ License 是什么？</summary><p>GitHub 开源，MIT License。技术栈：Rust + Tauri 2 + 原生前端（零框架依赖），纯逻辑层独立成 crate 可独立测试。</p></details>
+    <details class="reveal"><summary>源码在哪？ License 是什么？</summary><p>GitHub 开源，MIT License。技术栈：Electron 33 + Rust CLI + 原生前端（零框架依赖），核心逻辑层独立成 crate 可独立测试与复用。</p></details>
   </section>
 
 </main>
 
 <footer>
-  <div>Prompt Forge · Rust + Tauri 2 · MIT License</div>
+  <div>Prompt Forge · Electron 33 + Rust CLI · MIT License</div>
   <div class="foot-links">
     <a href="https://xmtooldev.gf.com.cn/">← 返回工具站</a> ·
     <a href="https://github.com/maxin-cn/prompt-forge" target="_blank" rel="noopener">GitHub 源码</a>
