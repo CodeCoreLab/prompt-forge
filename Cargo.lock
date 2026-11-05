@@ -737,7 +737,7 @@ dependencies = [
 
 [[package]]
 name = "prompt-forge-core"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "base64 0.22.1",
  "libloading",
@@ -747,7 +747,7 @@ dependencies = [
 
 [[package]]
 name = "prompt-forge-server"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "axum",
  "prompt-forge-core",

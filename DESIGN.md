@@ -12,7 +12,7 @@
 | 维度 | 问题 | 实测证据 |
 |------|------|----------|
 | **编译难度** | 4 套工具链叠加：Rust(msvc/gnu) + Node + electron-builder + NSIS/winCodeSign | 本机 Windows 无开发者模式 → NSIS 打包因 `Cannot create symbolic link` 直接失败；需自写 7za shim 绕过（已随版本删除） |
-| **依赖体积** | Electron 运行时 188MB + Chromium + `node_modules` 1.6GB | Chromium 与用户已有浏览器重复；安装包 75MB（便携版）→ 本方案 **1.58MB** |
+| **依赖体积** | Electron 运行时 188MB + Chromium + `node_modules` 1.6GB | Chromium 与用户已有浏览器重复；安装包 75MB（便携版）→ 本方案 **1.6MB** |
 | **升级成本** | Electron 大版本需同步 Chromium/Node ABI；原生模块需 node-gyp 重建 | `WebView2Loader.dll` 缺失导致 exe 无法启动的根因即来自打包链产物缺失 |
 | **功能缺陷** | 模式下拉框为空（`get_modes` 返回值未正确注入 UI） | Tauri CLI 直连 `get_modes` 正常返回 3 个模式，问题在 IPC 桥接层，未定位即随版本废弃 |
 
@@ -35,7 +35,7 @@
                             │ fetch('/api/xxx')
                             ▼
 ┌────────────────────────────────────────────────────────────┐
-│  prompt-forge.exe  （Rust，单文件 1.58MB）                   │
+│  prompt-forge.exe  （Rust，单文件 1.6MB）                   │
 │                                                            │
 │  main.rs        入口：参数解析 / 端口绑定 / 浏览器拉起        │
 │  api.rs         API 层：8 个端点 + 统一错误封装               │
@@ -135,9 +135,10 @@
 | `Cargo.toml` | 24 | workspace 定义，release profile（opt-level=z / lto / strip） |
 | `crates/prompt-forge-core/Cargo.toml` | 17 | 核心层依赖（serde / serde_json / base64 / libloading） |
 | `crates/prompt-forge-core/src/{config,crypto,llm,modes,normalize}.rs` | 800 | 核心纯逻辑（自 Tauri 版原样迁移） |
+| `crates/prompt-forge-core/src/ports.rs` | 99 | 端口候选序列 + 显式端口占用处置文案（纯逻辑，可独立测试） |
 | `crates/prompt-forge-server/Cargo.toml` | 40 | 服务端依赖（axum / tokio / reqwest / winreg） |
 | `crates/prompt-forge-server/build.rs` | 96 | 遍历 `web/` 生成内嵌资源表（零额外依赖） |
-| `crates/prompt-forge-server/src/main.rs` | 195 | 入口：参数、端口探测、路由装配、浏览器拉起、优雅退出 |
+| `crates/prompt-forge-server/src/main.rs` | 310 | 入口：参数、端口绑定（显式精确 / 默认顺延）、路由装配、浏览器拉起、优雅退出 |
 | `crates/prompt-forge-server/src/api.rs` | 340 | 8 个端点 + 统一错误封装 |
 | `crates/prompt-forge-server/src/llm.rs` | 330 | 四协议出站 + 重试 + 错误分类 |
 | `crates/prompt-forge-server/src/store.rs` | 175 | 配置/历史持久化（原子写、损坏留档、DPAPI） |
@@ -146,7 +147,7 @@
 | `crates/prompt-forge-server/src/state.rs` | 57 | 共享状态（取消令牌 + 配置锁） |
 | `crates/prompt-forge-server/src/static_files.rs` | 116 | 静态托管（内嵌表 + 磁盘热更 + SPA 兜底） |
 | `web/{index.html,app.js,style.css}` | ~640 | 前端三件套（原生，零框架） |
-| `dist/PromptForge.exe` | — | 发行产物 1.58MB |
+| `dist/PromptForge.exe` | — | 发行产物 1.6MB |
 | `dist/启动-发行版.bat` / `启动-开发版.bat` | — | 两个试用版本的启动脚本 |
 
 ### 修改
@@ -198,7 +199,7 @@
 | | Electron 版 | 本方案 | 变化 |
 |---|-----------|--------|------|
 | 运行时依赖 | Electron 188MB + Chromium + node_modules 1.6GB | — | — |
-| 交付体积 | 75MB（便携版） | **1.58MB** | **↓ 97.9%** |
+| 交付体积 | 75MB（便携版） | **1.6MB** | **↓ 97.9%** |
 | 编译工具链 | Rust + Node + electron-builder + NSIS | **仅 Rust** | ↓3 套 |
 | 非系统 DLL | WebView2Loader.dll 等 | **0 个** | 根治启动失败 |
 
@@ -228,7 +229,7 @@
 | **浏览器剪贴板权限** | P2 | `navigator.clipboard` 需安全上下文；已实现后端 `clip.exe` 兜底，双路径均实测通过 |
 | **并发配置写覆盖** | P1 | `config_lock` 互斥 + 原子写（tmp→rename），已实现 |
 | **配置损坏** | P1 | 解析失败自动留档 `config.json.corrupt` 并返回默认值，不静默丢数据（沿用旧版策略） |
-| **端口冲突** | P2 | 默认 8787，被占用时向后试探 20 个端口，兜底提示 |
+| **端口冲突** | P2 | 默认端口被占用 → 向后试探 20 个并打印实际端口；**显式 `--port` 被占用 → 直接报错退出**（不静默换端口，避免防火墙/书签/脚本指向失效端口） |
 | **API Key 明文返回给前端** | P2 | 与旧版同策略（前端需回显编辑）；DPAPI 保护的是**落盘**形态，非传输形态。服务仅绑 127.0.0.1 |
 | **历史记录从内存改为落盘** | P2 | 旧版 Tauri 为进程内栈（重启丢失），本版落 `history.json` 持久化——**功能增强**，非破坏性变更 |
 
@@ -257,7 +258,7 @@
 
 | 版本 | 形态 | 启动方式 | 适用场景 |
 |------|------|----------|----------|
-| **A 发行版** | 单文件 `PromptForge.exe`（1.58MB），前端内嵌 | `dist\启动-发行版.bat` | 日常使用、拷贝即用 |
+| **A 发行版** | 单文件 `PromptForge.exe`（1.6MB），前端内嵌 | `dist\启动-发行版.bat` | 日常使用、拷贝即用 |
 | **B 开发版** | 同一 exe + `--web-dir web`，前端读磁盘 | `dist\启动-开发版.bat` | 改前端热更（改完刷新浏览器即生效） |
 
 两者共享同一份配置（`%APPDATA%\prompt-forge\config.json`）与历史（`history.json`）。
