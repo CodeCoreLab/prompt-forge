@@ -1,7 +1,7 @@
 """打包发行产物：dist/PromptForge.exe + dist/PromptForge-<版本>-win64.zip
 
 用法（在 prompt-forge-web/ 下执行）:
-    python packaging/package.py [--version 1.1.2]
+    python packaging/package.py [--version 1.1.4]
 
 流程:
 1. 从 target/release/prompt-forge.exe 拷贝到 dist/PromptForge.exe
@@ -33,7 +33,7 @@ def sha256(path: Path) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--version", default="1.1.2", help="发行版本号")
+    ap.add_argument("--version", default="1.1.4", help="发行版本号")
     args = ap.parse_args()
 
     if not SRC_EXE.exists():
