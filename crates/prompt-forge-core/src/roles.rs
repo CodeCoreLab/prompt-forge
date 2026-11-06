@@ -107,28 +107,20 @@ pub struct ResolvedRole {
 /// 解析角色 id → 具体角色。
 /// 优先级：内置 id → 自定义 id → 默认角色（未知 id 静默回落到默认，不报错，保证增强链路不中断）。
 pub fn resolve(role_id: &str, customs: &[CustomRole]) -> ResolvedRole {
-    if let Some(r) = find_builtin(role_id) {
-        return ResolvedRole {
-            id: r.id.to_string(),
-            name: r.name.to_string(),
-            description: r.description.to_string(),
-            system_prompt: r.system_prompt.to_string(),
-            builtin: true,
-        };
-    }
-    if let Some(custom_id) = role_id.strip_prefix("custom-") {
-        if let Some(c) = customs.iter().find(|c| c.id == custom_id) {
-            return ResolvedRole {
-                id: c.full_id(),
-                name: c.name.clone(),
-                description: "[自定义角色]".to_string(),
-                system_prompt: c.system_prompt.clone(),
-                builtin: false,
-            };
-        }
-    }
-    // 未知 id → 回落默认角色
-    let d = find_builtin(DEFAULT_ROLE_ID).expect("默认内置角色必须存在");
+    resolve_with_fallback(role_id, customs).unwrap_or_else(|_| default_role())
+}
+
+/// 解析角色 id → 具体角色；未知 id 返回 `Err`（调用方可显式报错而非静默回落）。
+///
+/// 用于「用户显式指定了角色但该角色不存在」的场景——静默回落会让用户以为
+/// 自己用的还是那个角色，实际注入的却是另一个角色的 system prompt。
+pub fn resolve_strict(role_id: &str, customs: &[CustomRole]) -> Result<ResolvedRole, String> {
+    resolve_with_fallback(role_id, customs)
+}
+
+/// 默认角色（内置表首项，永不失败）
+pub fn default_role() -> ResolvedRole {
+    let d = find_builtin(DEFAULT_ROLE_ID).expect("默认内置角色必须存在（编译期常量）");
     ResolvedRole {
         id: d.id.to_string(),
         name: d.name.to_string(),
@@ -136,6 +128,34 @@ pub fn resolve(role_id: &str, customs: &[CustomRole]) -> ResolvedRole {
         system_prompt: d.system_prompt.to_string(),
         builtin: true,
     }
+}
+
+fn resolve_with_fallback(
+    role_id: &str,
+    customs: &[CustomRole],
+) -> Result<ResolvedRole, String> {
+    if let Some(r) = find_builtin(role_id) {
+        return Ok(ResolvedRole {
+            id: r.id.to_string(),
+            name: r.name.to_string(),
+            description: r.description.to_string(),
+            system_prompt: r.system_prompt.to_string(),
+            builtin: true,
+        });
+    }
+    if let Some(custom_id) = role_id.strip_prefix("custom-") {
+        if let Some(c) = customs.iter().find(|c| c.id == custom_id) {
+            return Ok(ResolvedRole {
+                id: c.full_id(),
+                name: c.name.clone(),
+                description: "[自定义角色]".to_string(),
+                system_prompt: c.system_prompt.clone(),
+                builtin: false,
+            });
+        }
+        return Err(format!("自定义角色不存在: {role_id}"));
+    }
+    Err(format!("未知角色: {role_id}"))
 }
 
 #[cfg(test)]
@@ -173,6 +193,17 @@ mod tests {
         let r = resolve("custom-not-exist", &[]);
         assert_eq!(r.id, DEFAULT_ROLE_ID);
         assert!(r.builtin);
+    }
+
+    /// 严格解析：未知 id 必须报错（不静默回落，避免用户误以为用的是所选角色）
+    #[test]
+    fn resolve_strict_reports_unknown() {
+        let e = resolve_strict("custom-not-exist", &[]).unwrap_err();
+        assert!(e.contains("custom-not-exist"), "实际: {e}");
+        let e2 = resolve_strict("builtin-nope", &[]).unwrap_err();
+        assert!(e2.contains("builtin-nope"), "实际: {e2}");
+        // 合法 id 正常解析
+        assert!(resolve_strict("builtin-general", &[]).is_ok());
     }
 
     #[test]

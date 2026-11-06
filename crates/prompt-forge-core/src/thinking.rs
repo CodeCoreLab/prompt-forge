@@ -19,18 +19,19 @@ use crate::methods::ThinkingLevel;
 /// 判定错误响应是否属于"参数不被支持"（可安全降级重试）。
 ///
 /// 只在 400 / 422 状态下判定——其他状态（401/403/429/5xx）与参数无关，重试无意义。
+///
+/// 文本来源覆盖多家网关的不同错误体形态：
+/// - `{"error":{"message":"..."}}`（OpenAI 系）
+/// - `{"error":{"type":"...","message":"..."}}`
+/// - `{"message":"..."}`
+/// - `{"error":"..."}`
+/// - `{"errors":[{"message":"..."}]}`（Gemini / 部分网关）
+/// - `{"detail":"..."}`（FastAPI 风格）
 pub fn is_unsupported_param_error(status: u16, body: &Value) -> bool {
     if status != 400 && status != 422 {
         return false;
     }
-    let text = body
-        .pointer("/error/message")
-        .and_then(|v| v.as_str())
-        .or_else(|| body.get("message").and_then(|v| v.as_str()))
-        .or_else(|| body.get("error").and_then(|v| v.as_str()))
-        .unwrap_or("")
-        .to_ascii_lowercase();
-
+    let text = collect_error_text(body);
     if text.is_empty() {
         return false;
     }
@@ -47,9 +48,13 @@ pub fn is_unsupported_param_error(status: u16, body: &Value) -> bool {
         "not permitted",
     ];
     // 参数名线索（提高判定精度，避免把"模型不存在"误判为参数问题）
+    //
+    // 注意：这里**不能**用裸 `"reasoning"` —— `"reasoning model not available"`
+    // 这类错误含有 reasoning 字样但与参数无关，误判会导致无谓降级重试。
+    // 只匹配具体参数名（含下划线的字段名）。
     const PARAM_HINTS: &[&str] = &[
         "reasoning_effort",
-        "reasoning",
+        "reasoning.content",
         "thinking",
         "budget_tokens",
         "enable_thinking",
@@ -60,6 +65,44 @@ pub fn is_unsupported_param_error(status: u16, body: &Value) -> bool {
     let has_signal = SIGNALS.iter().any(|s| text.contains(s));
     let has_param = PARAM_HINTS.iter().any(|s| text.contains(s));
     has_signal && has_param
+}
+
+/// 从各种错误体形态中收集可搜索的文本（转小写）
+fn collect_error_text(body: &Value) -> String {
+    let mut parts: Vec<String> = Vec::new();
+
+    fn push_str(parts: &mut Vec<String>, v: &Value) {
+        if let Some(s) = v.as_str() {
+            parts.push(s.to_string());
+        }
+    }
+
+    // OpenAI / Anthropic 系：error.message
+    if let Some(err) = body.get("error") {
+        push_str(&mut parts, err);
+        if let Some(m) = err.get("message") {
+            push_str(&mut parts, m);
+        }
+        if let Some(m) = err.get("type") {
+            push_str(&mut parts, m);
+        }
+        if let Some(m) = err.get("code") {
+            push_str(&mut parts, m);
+        }
+    }
+    // 顶层 message / detail
+    push_str(&mut parts, &body["message"]);
+    push_str(&mut parts, &body["detail"]);
+    // Gemini / 部分网关：errors[] 数组
+    if let Some(arr) = body.get("errors").and_then(|v| v.as_array()) {
+        for e in arr {
+            push_str(&mut parts, e);
+            if let Some(m) = e.get("message") {
+                push_str(&mut parts, m);
+            }
+        }
+    }
+    parts.join(" ").to_ascii_lowercase()
 }
 
 /// OpenAI 兼容协议：`reasoning_effort` 字段（部分模型支持）。
@@ -86,7 +129,9 @@ pub fn anthropic_thinking_params(level: ThinkingLevel) -> Option<Value> {
     if !level.is_on() {
         return None;
     }
-    let budget = level.budget_tokens().max(1024);
+    // 必须走 budget_tokens_for 收敛：某些档位的原始预算可能超出 Anthropic 上限，
+    // 直接发原始值会被服务端以 400 拒绝。
+    let budget = level.budget_tokens_for("anthropic").max(1024);
     Some(json!({
         "thinking": {
             "type": "enabled",
@@ -100,7 +145,9 @@ pub fn gemini_thinking_params(level: ThinkingLevel) -> Option<Value> {
     if !level.is_on() {
         return None;
     }
-    let budget = level.budget_tokens() as i64;
+    // 必须走 budget_tokens_for 收敛：Gemini 的 thinkingBudget 上限是 24576，
+    // 而「最强」档位的原始预算是 32768 —— 不收敛就会被 Gemini 以 400 拒绝。
+    let budget = level.budget_tokens_for("gemini") as i64;
     Some(json!({
         "thinkingConfig": {
             "thinkingBudget": budget,
@@ -123,7 +170,9 @@ pub fn anthropic_max_tokens(level: ThinkingLevel, requested: u32) -> u32 {
     if !level.is_on() {
         return requested;
     }
-    let budget = level.budget_tokens().max(1024);
+    // 与 anthropic_thinking_params 用同一个收敛后的预算，
+    // 否则两者口径不一致 → max_tokens 预算算小了，输出被截断。
+    let budget = level.budget_tokens_for("anthropic").max(1024);
     // Anthropic 要求 max_tokens > budget_tokens，留 1 倍余量给正式输出
     requested.max(budget.saturating_mul(2))
 }
@@ -151,6 +200,49 @@ mod tests {
         assert_eq!(g["thinkingConfig"]["thinkingBudget"], 1024);
         let ol = ollama_thinking_params(ThinkingLevel::Low).unwrap();
         assert_eq!(ol["think"], true);
+    }
+
+    /// 回归：Gemini 的 thinkingBudget 上限是 24576，而「最强」档位的原始预算是 32768。
+    ///
+    /// 不做协议收敛就会把 32768 发给 Gemini → 服务端直接 400 拒绝，
+    /// 用户看到「思考强度选最高档反而完全不能用」。
+    #[test]
+    fn gemini_budget_is_converged_to_protocol_limit() {
+        let g = gemini_thinking_params(ThinkingLevel::Max).unwrap();
+        let budget = g["thinkingConfig"]["thinkingBudget"].as_i64().unwrap();
+        assert!(
+            budget <= 24576,
+            "Gemini thinkingBudget 必须收敛到 24576 以内，实际 {budget}"
+        );
+        assert_eq!(budget, 24576, "应恰好收敛到协议上限");
+    }
+
+    /// Anthropic 上限 32768，等于最强档原始预算 → 不应被误收敛。
+    #[test]
+    fn anthropic_budget_keeps_full_value() {
+        let a = anthropic_thinking_params(ThinkingLevel::Max).unwrap();
+        assert_eq!(a["thinking"]["budget_tokens"], 32768);
+    }
+
+    /// anthropic_max_tokens 与 anthropic_thinking_params 必须用**同一个**收敛后预算，
+    /// 否则 max_tokens 会被算小 → 输出被截断。
+    #[test]
+    fn anthropic_max_tokens_uses_same_converged_budget_as_params() {
+        for level in [
+            ThinkingLevel::Low,
+            ThinkingLevel::Standard,
+            ThinkingLevel::Deep,
+            ThinkingLevel::Max,
+        ] {
+            let params = anthropic_thinking_params(level).unwrap();
+            let budget = params["thinking"]["budget_tokens"].as_u64().unwrap() as u32;
+            let max_tokens = anthropic_max_tokens(level, 1024);
+            assert!(
+                max_tokens > budget,
+                "{:?} 的 max_tokens({max_tokens}) 必须大于 budget({budget})",
+                level
+            );
+        }
     }
 
     #[test]

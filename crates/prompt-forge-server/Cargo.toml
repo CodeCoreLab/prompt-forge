@@ -44,3 +44,7 @@ winreg = "0.55"
 default = []
 # 诊断：打印逐请求访问日志
 trace-requests = []
+
+[build-dependencies]
+# build.rs 复用 core 的 Content-Type 映射（与运行期 static_files.rs 单一真源）
+prompt-forge-core = { path = "../prompt-forge-core" }

@@ -12,6 +12,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use prompt_forge_core::config::AppConfig;
 use prompt_forge_core::crypto;
@@ -21,6 +22,13 @@ use crate::paths::config_dir;
 const HISTORY_FILE: &str = "history.json";
 /// 历史容量上限（与前端提示「最近 20 条」一致）
 pub const HISTORY_CAP: usize = 20;
+
+/// 历史读-改-写互斥锁。
+///
+/// `push_history` 是「读全量 → 插入头部 → 整体写回」的复合操作，
+/// 没有锁时两个并发请求会互相覆盖：后写入者基于自己读到的旧快照落盘，
+/// 前者的那条历史凭空消失（丢历史，且用户无感知）。
+static HISTORY_LOCK: Mutex<()> = Mutex::new(());
 
 /// 一条历史记录
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -39,6 +47,17 @@ pub fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// 把 core 层缓冲的告警排空并打到 stderr。
+///
+/// core 层遵守「零日志 I/O」约束（不写 stdout/stderr），
+/// DPAPI 相关的告警（如「DPAPI 缓冲区未释放」）都进内存缓冲，
+/// **必须由 server 层取走**，否则用户永远看不到这些告警。
+fn flush_core_warnings() {
+    for w in crypto::drain_warnings() {
+        eprintln!("[prompt-forge] {w}");
+    }
+}
+
 /// 配置目录（确保存在）
 fn ensure_config_dir() -> Result<PathBuf, String> {
     let dir = config_dir();
@@ -54,39 +73,76 @@ pub fn load_config() -> Result<AppConfig, String> {
     }
     let raw = fs::read_to_string(&path).map_err(|e| format!("读取配置失败: {e}"))?;
     match serde_json::from_str::<AppConfig>(&raw) {
-        Ok(cfg) => Ok(cfg),
+        Ok(cfg) => {
+            flush_core_warnings();
+            Ok(cfg)
+        }
         Err(e) => {
             // 损坏数据留档 quarantine：绝不静默丢弃
-            let corrupt = path.with_extension("json.corrupt");
-            let _ = fs::copy(&path, &corrupt);
-            eprintln!("config.json 解析失败（已留档 {}）：{e}", corrupt.display());
+            // 留档文件名带时间戳：否则每次启动都会覆盖同一份留档，
+            // 第二次损坏时第一次的现场证据已被冲掉。
+            let corrupt = corrupt_archive_path(&path);
+            if let Err(e2) = fs::copy(&path, &corrupt) {
+                eprintln!(
+                    "config.json 解析失败（留档失败 {}: {e2}）：{e}",
+                    corrupt.display()
+                );
+            } else {
+                eprintln!("config.json 解析失败（已留档 {}）：{e}", corrupt.display());
+            }
+            flush_core_warnings();
             Ok(AppConfig::default())
         }
     }
 }
 
+/// 损坏留档的目标路径：`config.json.corrupt-<unix时间戳>`。
+///
+/// 带时间戳而不是固定名，避免后续损坏覆盖前一次现场。
+fn corrupt_archive_path(path: &Path) -> PathBuf {
+    let stamp = now_secs();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "config.json".to_string());
+    path.with_file_name(format!("{name}.corrupt-{stamp}"))
+}
+
 /// 保存配置：入口校验一次 → key 加密 → 原子写
+///
+/// 加密失败**整体失败**（不写盘）：宁可让用户重试，也不把 API Key 明文落盘。
 pub fn save_config(cfg: &AppConfig) -> Result<(), String> {
     cfg.validate()?; // 入口校验
     let mut owned = cfg.clone();
     // 落盘前把明文 key 加密（已是 enc: 形态的原样保留，避免重复加密）
     for p in &mut owned.profiles {
         if !crypto::is_encrypted(&p.api_key) {
-            p.api_key = crypto::store_key(&p.api_key);
+            p.api_key = crypto::store_key(&p.api_key)
+                .map_err(|e| format!("配置「{}」的 API Key 加密失败，已中止保存: {e}", p.name))?;
         }
     }
     let dir = ensure_config_dir()?;
     let path = dir.join(prompt_forge_core::config::CONFIG_FILE);
     let json = serde_json::to_string_pretty(&owned).map_err(|e| e.to_string())?;
-    atomic_write(&path, json.as_bytes())
+    atomic_write(&path, json.as_bytes())?;
+    flush_core_warnings();
+    Ok(())
 }
 
 /// 读取配置（返回给前端的形态：API Key 解密为明文，供前端编辑显示）
+///
+/// 解密失败**显式报错**（不静默变空串）：密文损坏通常意味着配置被拷贝到别的机器/用户，
+/// 必须让用户看到原因，而不是面对一个莫名其妙的 401。
 pub fn load_config_for_client() -> Result<AppConfig, String> {
     let mut cfg = load_config()?;
     for p in &mut cfg.profiles {
-        p.api_key = crypto::load_key(&p.api_key);
+        if crypto::is_encrypted(&p.api_key) {
+            p.api_key = crypto::load_key(&p.api_key).map_err(|e| {
+                format!("配置「{}」的 API Key 解密失败: {e}", p.name)
+            })?;
+        }
     }
+    flush_core_warnings();
     Ok(cfg)
 }
 
@@ -106,21 +162,23 @@ pub fn load_history() -> Vec<HistoryEntry> {
 }
 
 /// 追加一条历史并落盘（超限驱逐最旧）
+///
+/// 整个「读 → 插入 → 写回」在 `HISTORY_LOCK` 内完成：
+/// 没有锁时并发请求会各自基于旧快照写回，**互相覆盖导致丢历史**。
 pub fn push_history(entry: HistoryEntry) {
+    let _guard = HISTORY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut list = load_history(); // 新→旧
     list.insert(0, entry);
     list.truncate(HISTORY_CAP);
     // 落盘为旧→新（append 语义）
     let mut stored = list;
     stored.reverse();
-    let path = config_dir().join(HISTORY_FILE);
     if let Ok(dir) = ensure_config_dir() {
         let path = dir.join(HISTORY_FILE);
         if let Ok(json) = serde_json::to_string_pretty(&stored) {
             let _ = atomic_write(&path, json.as_bytes());
         }
     }
-    let _ = path; // 目录不存在时上面的 ensure_config_dir 已兜底
 }
 
 /// 原子写入：先写同目录临时文件，再 rename 覆盖

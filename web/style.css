@@ -566,6 +566,8 @@ body {
   margin-bottom: 14px;
 }
 .control { padding: 7px 9px; }
+/* 设置抽屉里的下拉框默认 34px/12px 偏小，抬到 38px/13px 与同行操作区等高 */
+.drawer-body select.control { min-height: 38px; font-size: 13px; padding: 8px 10px; }
 .control:hover, .form-control input:hover { border-color: var(--border-strong); }
 
 .control:focus, .form-control input:focus, .form-control select:focus,

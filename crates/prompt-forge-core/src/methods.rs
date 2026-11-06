@@ -151,6 +151,47 @@ impl ThinkingLevel {
         }
     }
 
+    /// 解析强度 id；未知值返回 `Err`（供配置校验等「拒绝非法输入」的场景使用）。
+    ///
+    /// 与 [`parse`](Self::parse) 的区别：
+    /// - `parse` 面向**运行时容错**：未知值回落标准档，保证增强链路不中断。
+    /// - `parse_strict` 面向**配置校验**：未知值必须报错，避免用户把「深度/极致」
+    ///   拼错后静默降级为标准档（用户以为开了深度思考，实际发出的是 4096 预算）。
+    ///
+    /// 接受的取值集合与 `parse` 完全一致（含 `none`/`disable`/`light`/`high`/`maximum`
+    /// 等历史别名，大小写不敏感），只是**不再对未知值静默回落**——
+    /// 这样老配置里已存的别名不会被误判为非法。
+    ///
+    /// 错误信息里的可选值列表**从 [`ALL`](Self::ALL) 动态生成**，
+    /// 避免新增档位时错误提示与实际取值集合漂移。
+    pub fn parse_strict(s: &str) -> Result<ThinkingLevel, String> {
+        let t = s.trim().to_ascii_lowercase();
+        // 1) 先按标准 id 精确匹配（来源：ALL，保证与实际档位集合一致）
+        if let Some(level) = ThinkingLevel::ALL.iter().find(|l| l.id() == t) {
+            return Ok(*level);
+        }
+        // 2) 再接受历史别名（与 parse 一致，老配置不会被误判非法）
+        let alias = match t.as_str() {
+            "none" | "disable" => Some(ThinkingLevel::Off),
+            "light" => Some(ThinkingLevel::Low),
+            "high" => Some(ThinkingLevel::Deep),
+            "maximum" => Some(ThinkingLevel::Max),
+            _ => None,
+        };
+        if let Some(level) = alias {
+            return Ok(level);
+        }
+        // 3) 未知值 → 报错，可选值列表由 ALL 生成
+        Err(format!(
+            "未知深度思考强度: {s}（可选: {}）",
+            ThinkingLevel::ALL
+                .iter()
+                .map(|l| l.id())
+                .collect::<Vec<_>>()
+                .join(" / ")
+        ))
+    }
+
     /// 推理 token 预算（供 Anthropic thinking.budget_tokens 等使用）
     pub fn budget_tokens(&self) -> u32 {
         match self {
@@ -159,6 +200,37 @@ impl ThinkingLevel {
             ThinkingLevel::Standard => 4096,
             ThinkingLevel::Deep => 16384,
             ThinkingLevel::Max => 32768,
+        }
+    }
+
+    /// 按协议收敛后的推理 token 预算。
+    ///
+    /// 各家对推理预算有各自的上限，超出会被直接拒绝（400）：
+    /// - **Anthropic**：`thinking.budget_tokens` 上限 32768（多数模型即为此值，
+    ///   个别模型更严）。
+    /// - **Gemini**：`thinkingConfig.thinkingBudget` 上限通常为 24576
+    ///   （2.5 Pro 等；另有 -1 表示动态思考，由模型自决）。
+    /// - **OpenAI / Ollama**：不使用 `budget_tokens`（走 `reasoning_effort` /
+    ///   `think` 开关），原样返回。
+    ///
+    /// 用法：把 [`budget_tokens`](Self::budget_tokens) 的原始值传入本函数，
+    /// 得到该协议下可安全发送的预算值。
+    pub fn budget_tokens_for(&self, protocol: &str) -> u32 {
+        let raw = self.budget_tokens();
+        match protocol {
+            "anthropic" => raw.min(ANTHROPIC_MAX_BUDGET),
+            "gemini" => raw.min(GEMINI_MAX_BUDGET),
+            // OpenAI / Ollama / 未知协议：不用 budget_tokens，原样返回
+            _ => raw,
+        }
+    }
+
+    /// 该协议下的推理预算上限；无上限概念（不用 budget_tokens）时返回 None。
+    pub fn max_budget_for(protocol: &str) -> Option<u32> {
+        match protocol {
+            "anthropic" => Some(ANTHROPIC_MAX_BUDGET),
+            "gemini" => Some(GEMINI_MAX_BUDGET),
+            _ => None,
         }
     }
 
@@ -180,6 +252,18 @@ impl ThinkingLevel {
 }
 
 pub const DEFAULT_THINKING_ID: &str = "standard";
+
+/// Anthropic `thinking.budget_tokens` 的协议上限。
+///
+/// Anthropic 对扩展思考预算有硬上限，多数模型为 32768（个别模型更严），
+/// 超过上限的请求会被直接拒绝。
+pub const ANTHROPIC_MAX_BUDGET: u32 = 32768;
+
+/// Gemini `thinkingConfig.thinkingBudget` 的协议上限。
+///
+/// Gemini 2.5 Pro 等模型的思考预算上限为 24576（另有 -1 = 动态思考），
+/// 发送 32768 会被拒绝。
+pub const GEMINI_MAX_BUDGET: u32 = 24576;
 
 #[cfg(test)]
 mod tests {
@@ -217,5 +301,142 @@ mod tests {
         assert!(!ThinkingLevel::Off.is_on());
         assert!(ThinkingLevel::Off.openai_reasoning_effort().is_none());
         assert!(ThinkingLevel::Low.openai_reasoning_effort().is_some());
+    }
+
+    // ── 按协议的预算上限收敛 ────────────────────────────────────
+
+    /// 回归：Max 档原始预算 32768 超过 Gemini 上限，必须收敛到 24576
+    #[test]
+    fn budget_clamped_for_gemini() {
+        assert_eq!(ThinkingLevel::Max.budget_tokens_for("gemini"), GEMINI_MAX_BUDGET);
+        assert_eq!(ThinkingLevel::Max.budget_tokens_for("gemini"), 24576);
+        // 未超上限的档位不受影响
+        assert_eq!(ThinkingLevel::Deep.budget_tokens_for("gemini"), 16384);
+        assert_eq!(ThinkingLevel::Low.budget_tokens_for("gemini"), 1024);
+        assert_eq!(ThinkingLevel::Off.budget_tokens_for("gemini"), 0);
+    }
+
+    #[test]
+    fn budget_clamped_for_anthropic() {
+        // Anthropic 上限 32768 = Max 档原始值，故 Max 不变
+        assert_eq!(ThinkingLevel::Max.budget_tokens_for("anthropic"), ANTHROPIC_MAX_BUDGET);
+        assert_eq!(ThinkingLevel::Max.budget_tokens_for("anthropic"), 32768);
+        assert_eq!(ThinkingLevel::Deep.budget_tokens_for("anthropic"), 16384);
+        assert_eq!(ThinkingLevel::Off.budget_tokens_for("anthropic"), 0);
+    }
+
+    /// OpenAI / Ollama 不使用 budget_tokens → 原样返回
+    #[test]
+    fn budget_unchanged_for_openai_and_ollama() {
+        assert_eq!(ThinkingLevel::Max.budget_tokens_for("openai"), 32768);
+        assert_eq!(ThinkingLevel::Max.budget_tokens_for("ollama"), 32768);
+        assert_eq!(ThinkingLevel::Max.budget_tokens_for("unknown"), 32768);
+    }
+
+    #[test]
+    fn max_budget_lookup() {
+        assert_eq!(ThinkingLevel::max_budget_for("anthropic"), Some(32768));
+        assert_eq!(ThinkingLevel::max_budget_for("gemini"), Some(24576));
+        assert_eq!(ThinkingLevel::max_budget_for("openai"), None);
+        assert_eq!(ThinkingLevel::max_budget_for("ollama"), None);
+    }
+
+    /// 收敛后的预算不得大于该协议的原始预算
+    #[test]
+    fn clamped_budget_never_exceeds_raw() {
+        for level in ThinkingLevel::ALL {
+            for proto in ["anthropic", "gemini", "openai", "ollama"] {
+                assert!(
+                    level.budget_tokens_for(proto) <= level.budget_tokens(),
+                    "{:?}/{} 收敛后反而变大",
+                    level,
+                    proto
+                );
+            }
+        }
+    }
+
+    // ── 严格解析（供配置校验使用）──────────────────────────────
+
+    /// 回归：未知强度 id 必须报错，不能静默回落标准档
+    #[test]
+    fn parse_strict_rejects_unknown() {
+        assert!(ThinkingLevel::parse_strict("xx").is_err());
+        assert!(ThinkingLevel::parse_strict("").is_err());
+        assert!(ThinkingLevel::parse_strict("mediu").is_err());
+        // 错误信息要带上非法值与可选值列表
+        let e = ThinkingLevel::parse_strict("xx").unwrap_err();
+        assert!(e.contains("xx"));
+        assert!(e.contains("standard"));
+    }
+
+    #[test]
+    fn parse_strict_accepts_valid_and_aliases() {
+        assert_eq!(ThinkingLevel::parse_strict("deep").unwrap(), ThinkingLevel::Deep);
+        // 大小写不敏感
+        assert_eq!(ThinkingLevel::parse_strict("DEEP").unwrap(), ThinkingLevel::Deep);
+        assert_eq!(ThinkingLevel::parse_strict("Max").unwrap(), ThinkingLevel::Max);
+        // 首尾空白容错
+        assert_eq!(ThinkingLevel::parse_strict(" low ").unwrap(), ThinkingLevel::Low);
+        // 历史别名（与 parse 接受集合一致，老配置不会被误判非法）
+        assert_eq!(ThinkingLevel::parse_strict("none").unwrap(), ThinkingLevel::Off);
+        assert_eq!(ThinkingLevel::parse_strict("disable").unwrap(), ThinkingLevel::Off);
+        assert_eq!(ThinkingLevel::parse_strict("light").unwrap(), ThinkingLevel::Low);
+        assert_eq!(ThinkingLevel::parse_strict("high").unwrap(), ThinkingLevel::Deep);
+        assert_eq!(ThinkingLevel::parse_strict("maximum").unwrap(), ThinkingLevel::Max);
+    }
+
+    /// 严格版与宽松版对「已知值」的判定必须一致（严格版只是多了一层未知值报错）
+    #[test]
+    fn parse_strict_agrees_with_parse_on_known_values() {
+        for s in [
+            "off", "none", "disable", "low", "light", "standard", "deep", "high", "max", "maximum",
+            "OFF", "Deep", " max ",
+        ] {
+            assert_eq!(
+                ThinkingLevel::parse_strict(s).unwrap(),
+                ThinkingLevel::parse(s),
+                "parse_strict 与 parse 对 {s} 判定不一致"
+            );
+        }
+    }
+
+    /// 严格解析必须容忍首尾空白与大小写差异
+    #[test]
+    fn parse_strict_tolerates_whitespace_and_case() {
+        assert_eq!(
+            ThinkingLevel::parse_strict("  DEEP  ").unwrap(),
+            ThinkingLevel::Deep
+        );
+        assert_eq!(
+            ThinkingLevel::parse_strict("\tMax\n").unwrap(),
+            ThinkingLevel::Max
+        );
+        assert_eq!(
+            ThinkingLevel::parse_strict(" OfF ").unwrap(),
+            ThinkingLevel::Off
+        );
+    }
+
+    /// 严格解析的错误信息必须列出**全部**可选 id（从 ALL 生成，不硬编码）
+    #[test]
+    fn parse_strict_error_lists_all_option_ids() {
+        let e = ThinkingLevel::parse_strict("nope").unwrap_err();
+        for level in ThinkingLevel::ALL {
+            assert!(
+                e.contains(level.id()),
+                "错误信息应包含可选值 {}: {e}",
+                level.id()
+            );
+        }
+        assert!(e.contains("nope"), "错误信息应包含非法值: {e}");
+    }
+
+    /// 回归：宽松版 `parse` 对未知值仍回落标准档（运行时容错语义不得改变）
+    #[test]
+    fn parse_still_falls_back_to_standard() {
+        assert_eq!(ThinkingLevel::parse("xx"), ThinkingLevel::Standard);
+        assert_eq!(ThinkingLevel::parse(""), ThinkingLevel::Standard);
+        assert_eq!(ThinkingLevel::parse("nope"), ThinkingLevel::Standard);
     }
 }
