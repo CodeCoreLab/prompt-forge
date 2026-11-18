@@ -272,7 +272,8 @@ pub fn protect(plain: &str) -> Result<String, String> {
     #[cfg(not(target_os = "windows"))]
     {
         let bytes = linux::protect_bytes(plain)?;
-        Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+        let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+        Ok(format!("{PREFIX}{b64}"))
     }
 }
 
@@ -288,8 +289,9 @@ pub fn unprotect(stored: &str) -> Result<String, String> {
     }
     #[cfg(not(target_os = "windows"))]
     {
+        let b64 = stored.strip_prefix(PREFIX).ok_or("非加密格式")?;
         let bytes = base64::engine::general_purpose::STANDARD
-            .decode(stored)
+            .decode(b64)
             .map_err(|e| format!("base64 解码失败: {e}"))?;
         linux::unprotect_bytes(&bytes)
     }
@@ -372,8 +374,8 @@ mod linux_tests {
     fn aes_gcm_roundtrip() {
         let plain = "sk-test-key-12345";
         let enc = protect(plain).unwrap();
-        // 新格式：纯 base64（nonce 前置），不带 enc: 前缀
-        assert!(!enc.starts_with(PREFIX));
+        // 全平台统一 enc: 前缀格式（load_key 靠前缀识别密文形态）
+        assert!(enc.starts_with(PREFIX));
         assert!(!enc.contains(plain)); // 密文不含明文
         assert_eq!(load_key(&enc).unwrap(), plain);
     }
@@ -389,16 +391,17 @@ mod linux_tests {
     fn corrupted_ciphertext_is_error() {
         // 篡改密文 → GCM 认证失败，显式报错
         let enc = protect("sk-real").unwrap();
-        let mut bytes = base64::engine::general_purpose::STANDARD.decode(&enc).unwrap();
+        let b64 = enc.strip_prefix(PREFIX).unwrap_or(&enc);
+        let mut bytes = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
         let last = bytes.len() - 1;
         bytes[last] ^= 0xFF;
-        let bad = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        let bad = format!("{PREFIX}{}", base64::engine::general_purpose::STANDARD.encode(&bytes));
         assert!(unprotect(&bad).is_err());
     }
 
     #[test]
     fn short_ciphertext_is_error() {
-        let bad = base64::engine::general_purpose::STANDARD.encode([1u8, 2, 3]);
+        let bad = format!("{PREFIX}{}", base64::engine::general_purpose::STANDARD.encode([1u8, 2, 3]));
         assert!(unprotect(&bad).is_err());
     }
 
