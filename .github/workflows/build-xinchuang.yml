@@ -68,8 +68,10 @@ jobs:
         run: |
           BIN=target/${{ matrix.target }}/release/prompt-forge
           test -f "$BIN" || { echo "产物缺失: $BIN"; exit 1; }
-          file "$BIN"
           ls -lh "$BIN"
+          # 容器无 file 命令，用 readelf 读 ELF Machine 字段验证架构
+          # x86-64=62(0x3e) / AArch64=183(0xb7)
+          readelf -h "$BIN" | grep -E "Class|Machine"
 
       - name: 冒烟验证（x86_64 可原生运行）
         if: matrix.target == 'x86_64-unknown-linux-gnu'
