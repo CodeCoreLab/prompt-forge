@@ -27,9 +27,11 @@ tokio = { version = "1", default-features = false, features = [
 # 优雅取消令牌（enhance 可中断）
 tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
 # LLM 出站 HTTP
+# TLS 后端选 rustls：交叉编译 aarch64 Linux（信创麒麟/UOS）时避免依赖目标机
+# OpenSSL 头文件与 pkg-config，cargo-zigbuild / 原生 arm64 构建均可直接出静态 TLS 产物。
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
-    "native-tls",
+    "rustls-tls",
     "charset",
     "http2",
 ] }

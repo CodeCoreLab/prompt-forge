@@ -1,0 +1,94 @@
+name: build-xinchuang
+
+# 信创 Linux 构建与验证：
+# - ubuntu-24.04 runner 原生编译（免交叉工具链），x86_64 + aarch64 双目标
+#   （GitHub 提供 arm64 原生 runner，无需 qemu）
+# - ubuntu-20.04 容器基线保 glibc ≤ 2.31，兼容麒麟 V10 / 统信 UOS
+# - rustls TLS：无需目标机 OpenSSL
+# 产物上传 artifact；发布版另走 packaging（后续接 release）
+
+on:
+  push:
+    branches: [main, "feat/**"]
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    name: ${{ matrix.target }} (glibc 2.31 基线)
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    container:
+      image: ubuntu:20.04
+    steps:
+      - name: 安装基础工具
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y -qq curl build-essential git ca-certificates
+          # machine-id（crypto 单测依赖，容器内无）
+          systemd machine-id --print >/etc/machine-id 2>/dev/null || \
+            dbus-uuidgen --ensure 2>/dev/null || \
+            printf '%032x\n' 1234 > /etc/machine-id
+
+      - name: 安装 Rust（1.75 最低版，装 stable）
+        run: |
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 添加目标平台
+        run: rustup target add ${{ matrix.target }}
+
+      - name: 缓存 cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: 单元测试（host 目标）
+        run: cargo test --workspace
+
+      - name: 构建 release（${{ matrix.target }}）
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: 产物校验
+        run: |
+          BIN=target/${{ matrix.target }}/release/prompt-forge
+          test -f "$BIN" || { echo "产物缺失: $BIN"; exit 1; }
+          file "$BIN"
+          ls -lh "$BIN"
+
+      - name: 冒烟验证（x86_64 可原生运行）
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          BIN=target/${{ matrix.target }}/release/prompt-forge
+          # 后台起服务，验证 HTTP 面板与 API 健康后杀掉
+          "$BIN" --port 18787 --no-browser &
+          PID=$!
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:18787/ >/dev/null && break
+            sleep 0.5
+          done
+          curl -sf http://127.0.0.1:18787/ >/dev/null || { echo "面板拉起失败"; kill $PID; exit 1; }
+          echo "面板 OK"
+          kill $PID
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: prompt-forge-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/prompt-forge
+          if-no-files-found: error

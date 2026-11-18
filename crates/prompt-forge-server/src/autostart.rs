@@ -1,9 +1,8 @@
-//! 开机自启（Windows 注册表 `HKCU\...\Run`）。
+//! 开机自启。
 //!
-//! 历史版本用 Tauri autostart 插件实现；纯 Web 版本改为直接写注册表 Run 键，
-//! 依赖 `winreg`（纯 Rust 调用 Win32 API，无 C 依赖、无 node-gyp）。
-//!
-//! 非 Windows 平台：不支持（返回明确错误，不静默假装成功）。
+//! Windows：注册表 `HKCU\...\Run`，依赖 `winreg`（纯 Rust 调用 Win32 API，无 C 依赖）。
+//! Linux（信创麒麟/UOS）：写 XDG autostart 规范的 `.desktop` 文件，桌面会话登录后自动拉起。
+//! 两个平台均为幂等实现：重复启用/关闭结果一致。
 
 /// 注册表项名称
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -59,19 +58,56 @@ pub fn is_enabled() -> bool {
     }
 }
 
+/// Linux autostart 目录（`$XDG_CONFIG_HOME/autostart`，缺省 `~/.config/autostart`）
+#[cfg(not(target_os = "windows"))]
+fn xdg_autostart_dir() -> Result<std::path::PathBuf, String> {
+    if let Some(v) = std::env::var_os("XDG_CONFIG_HOME") {
+        if !v.is_empty() {
+            return Ok(std::path::PathBuf::from(v).join("autostart"));
+        }
+    }
+    let home = std::env::var_os("HOME")
+        .ok_or("无法定位 HOME 目录，无法写入自启项")?
+        .to_string_lossy()
+        .into_owned();
+    Ok(std::path::PathBuf::from(home).join(".config/autostart"))
+}
+
+/// 启用开机自启（Linux：写 XDG autostart `.desktop`）
 #[cfg(not(target_os = "windows"))]
 pub fn enable() -> Result<(), String> {
-    Err("当前平台不支持开机自启".into())
+    let exe = std::env::current_exe().map_err(|e| format!("无法定位可执行文件: {e}"))?;
+    let dir = xdg_autostart_dir()?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建 autostart 目录失败: {e}"))?;
+    let file = dir.join("prompt-forge.desktop");
+    // Exec 按 .desktop 规范转义双引号，兼容含空格路径
+    let content = format!(
+        "[Desktop Entry]\nType=Application\nVersion=1.0\nName=Prompt Forge\n\
+         Comment=提示词增强工具\nExec=\"{}\"\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
+        exe.display().to_string().replace('"', "\\\"")
+    );
+    std::fs::write(&file, content).map_err(|e| format!("写入自启项失败: {e}"))?;
+    Ok(())
 }
 
+/// 关闭开机自启（Linux：删 `.desktop`；幂等，不存在视为已关闭）
 #[cfg(not(target_os = "windows"))]
 pub fn disable() -> Result<(), String> {
-    Err("当前平台不支持开机自启".into())
+    let dir = xdg_autostart_dir()?;
+    match std::fs::remove_file(dir.join("prompt-forge.desktop")) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("删除自启项失败: {e}")),
+    }
 }
 
+/// 查询当前是否已启用自启（Linux：`.desktop` 文件存在即启用）
 #[cfg(not(target_os = "windows"))]
 pub fn is_enabled() -> bool {
-    false
+    match xdg_autostart_dir() {
+        Ok(dir) => dir.join("prompt-forge.desktop").exists(),
+        Err(_) => false,
+    }
 }
 
 /// 按配置同步自启状态（保存配置时调用，即时生效）

@@ -1,10 +1,11 @@
-//! API Key DPAPI 加密（P2-3）。
+//! API Key 加密（P2-3）。
 //!
-//! Windows：CryptProtectData/CryptUnprotectData（当前用户作用域，跨进程不可解）。
+//! Windows：CryptProtectData/CryptUnprotectData（DPAPI，当前用户作用域，跨进程不可解）。
+//! Linux（信创麒麟/UOS）：AES-256-GCM 对称加密，主密钥 = SHA-256(machine-id) 派生，
+//! 实现「本机可解、跨机不可解」的等效保护语义。
 //! 存储格式：`enc:<base64>`；读取时识别前缀解密，明文原样透传（向后兼容旧配置）。
-//! 非 Windows：明文透传（桌面定位以 Windows 为主）。
 //!
-//! 实现用 Crypt32.dll 的 C ABI 直调（fn! 类型别名声明签名），不依赖 windows crate
+//! Windows 实现用 Crypt32.dll 的 C ABI 直调（fn! 类型别名声明签名），不依赖 windows crate
 //! 的版本敏感包装，规避 LocalFree/Option<Blob> 等签名漂移问题。
 //!
 //! **零 I/O 约束**：本模块属 core crate，不得直接写日志。运行期告警统一进入
@@ -197,7 +198,69 @@ mod dpapi {
     }
 }
 
-/// 明文 → `enc:<base64>`（Windows）；其他平台原样
+/// Linux（信创）：AES-256-GCM 对称加密，主密钥 = SHA-256(machine-id + 域分隔串)。
+/// machine-id（`/etc/machine-id`）保证「本机可解、跨机不可解」，语义对齐 DPAPI
+/// 的用户作用域。纯 Rust 实现（aes-gcm/sha2 crate，无 OpenSSL），交叉编译零障碍。
+#[cfg(not(target_os = "windows"))]
+mod linux {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::{Aes256Gcm, Nonce};
+
+    /// machine-id：本机唯一标识（麒麟 V10 / UOS 均有）。
+    fn machine_id() -> Result<String, String> {
+        for p in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+            if let Ok(s) = std::fs::read_to_string(p) {
+                let t = s.trim();
+                if !t.is_empty() {
+                    return Ok(t.to_string());
+                }
+            }
+        }
+        Err("无法读取 machine-id（/etc/machine-id 不存在）".into())
+    }
+
+    /// 主密钥 = SHA-256(machine-id + "prompt-forge/v1")，32 字节。
+    fn derive_key() -> Result<[u8; 32], String> {
+        use sha2::{Digest, Sha256};
+        let mid = machine_id()?;
+        let mut h = Sha256::new();
+        h.update(mid.as_bytes());
+        h.update(b"prompt-forge/v1");
+        Ok(h.finalize().into())
+    }
+
+    /// 明文 → AES-256-GCM 密文（随机 12 字节 nonce 前置拼接到输出）。
+    pub fn protect_bytes(plain: &str) -> Result<Vec<u8>, String> {
+        let key = derive_key()?;
+        let cipher = Aes256Gcm::new((&key).into());
+        let mut nonce = [0u8; 12];
+        std::fs::read("/dev/urandom", &mut nonce)
+            .map_err(|e| format!("读取 /dev/urandom 失败: {e}"))?;
+        let ct = cipher
+            .encrypt(Nonce::from_slice(&nonce), plain.as_bytes())
+            .map_err(|e| format!("AES-GCM 加密失败: {e}"))?;
+        let mut out = Vec::with_capacity(12 + ct.len());
+        out.extend_from_slice(&nonce);
+        out.extend_from_slice(&ct);
+        Ok(out)
+    }
+
+    /// 密文（nonce 前置）→ 明文。
+    pub fn unprotect_bytes(data: &[u8]) -> Result<String, String> {
+        if data.len() <= 12 {
+            return Err("密文格式异常（长度不足）".into());
+        }
+        let (nonce, ct) = data.split_at(12);
+        let key = derive_key()?;
+        let cipher = Aes256Gcm::new((&key).into());
+        let pt = cipher
+            .decrypt(Nonce::from_slice(nonce), ct)
+            .map_err(|_| "AES-GCM 解密失败（密文可能来自其他机器）".to_string())?;
+        String::from_utf8(pt).map_err(|e| format!("明文 UTF-8 解码失败: {e}"))
+    }
+}
+
+/// 明文 → `enc:<base64>`（Windows=DPAPI；Linux=AES-256-GCM+machine-id 派生密钥）
 pub fn protect(plain: &str) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
@@ -206,7 +269,8 @@ pub fn protect(plain: &str) -> Result<String, String> {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        Ok(plain.to_string())
+        let bytes = linux::protect_bytes(plain)?;
+        Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
     }
 }
 
@@ -222,8 +286,10 @@ pub fn unprotect(stored: &str) -> Result<String, String> {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = stored;
-        Err("当前平台不支持解密".into())
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(stored)
+            .map_err(|e| format!("base64 解码失败: {e}"))?;
+        linux::unprotect_bytes(&bytes)
     }
 }
 
@@ -292,6 +358,58 @@ mod tests {
         let enc = store_key("sk-roundtrip").unwrap();
         assert!(is_encrypted(&enc));
         assert_eq!(load_key(&enc).unwrap(), "sk-roundtrip");
+    }
+}
+
+/// Linux 加密实现的行为约束（GitHub Actions ubuntu runner / 信创真机均跑）
+#[cfg(all(test, not(target_os = "windows")))]
+mod linux_tests {
+    use super::*;
+
+    #[test]
+    fn aes_gcm_roundtrip() {
+        let plain = "sk-test-key-12345";
+        let enc = protect(plain).unwrap();
+        // 新格式：纯 base64（nonce 前置），不带 enc: 前缀
+        assert!(!enc.starts_with(PREFIX));
+        assert!(!enc.contains(plain)); // 密文不含明文
+        assert_eq!(load_key(&enc).unwrap(), plain);
+    }
+
+    #[test]
+    fn nonce_is_random_per_call() {
+        let a = protect("same-plaintext").unwrap();
+        let b = protect("same-plaintext").unwrap();
+        assert_ne!(a, b, "随机 nonce 必须保证相同明文产出不同密文");
+    }
+
+    #[test]
+    fn corrupted_ciphertext_is_error() {
+        // 篡改密文 → GCM 认证失败，显式报错
+        let enc = protect("sk-real").unwrap();
+        let mut bytes = base64::engine::general_purpose::STANDARD.decode(&enc).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xFF;
+        let bad = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        assert!(unprotect(&bad).is_err());
+    }
+
+    #[test]
+    fn short_ciphertext_is_error() {
+        let bad = base64::engine::general_purpose::STANDARD.encode([1u8, 2, 3]);
+        assert!(unprotect(&bad).is_err());
+    }
+
+    #[test]
+    fn plaintext_passthrough() {
+        assert_eq!(load_key("sk-plain").unwrap(), "sk-plain");
+        assert_eq!(store_key("").unwrap(), "");
+    }
+
+    #[test]
+    fn is_encrypted_check() {
+        assert!(is_encrypted("enc:abcd"));
+        assert!(!is_encrypted("sk-plain"));
     }
 }
 

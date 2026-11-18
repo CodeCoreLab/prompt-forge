@@ -13,3 +13,8 @@ base64 = "0.22"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 libloading = "0.8"
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+# 信创 Linux 加密栈：纯 Rust 实现，无 OpenSSL 依赖，交叉编译零障碍
+aes-gcm = "0.10"
+sha2 = "0.10"
