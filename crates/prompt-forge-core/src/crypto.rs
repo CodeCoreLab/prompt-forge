@@ -231,10 +231,12 @@ mod linux {
 
     /// 明文 → AES-256-GCM 密文（随机 12 字节 nonce 前置拼接到输出）。
     pub fn protect_bytes(plain: &str) -> Result<Vec<u8>, String> {
+        use std::io::Read;
         let key = derive_key()?;
         let cipher = Aes256Gcm::new((&key).into());
         let mut nonce = [0u8; 12];
-        std::fs::read("/dev/urandom", &mut nonce)
+        std::fs::File::open("/dev/urandom")
+            .and_then(|mut f| f.read_exact(&mut nonce))
             .map_err(|e| format!("读取 /dev/urandom 失败: {e}"))?;
         let ct = cipher
             .encrypt(Nonce::from_slice(&nonce), plain.as_bytes())
