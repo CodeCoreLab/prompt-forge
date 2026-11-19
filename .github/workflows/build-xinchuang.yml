@@ -101,6 +101,8 @@ jobs:
     needs: build-linux
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write   # GITHUB_TOKEN 默认只读，创建 Release 必须显式开
     steps:
       - name: 下载双架构产物
         uses: actions/download-artifact@v4
