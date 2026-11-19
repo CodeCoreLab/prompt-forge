@@ -111,7 +111,7 @@ jobs:
 
       - name: 整理命名（版本号 + 架构后缀）
         run: |
-          VER="${GITHUB_REF_NAME}"
+          VER="${GITHUB_REF_NAME##*/}"   # 分支名含 / 只取尾段，避免文件名带斜杠
           [ "$VER" = "main" ] && VER="ci-$(date +%Y%m%d)"
           mkdir -p rel
           for d in dist/prompt-forge-*/; do
